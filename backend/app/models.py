@@ -26,7 +26,6 @@ class Underlying(Base):
     symbol = Column(String(15), unique=True, nullable=False)
     market = Column(String(15), nullable=False)  # 'crypto' or 'equity'
     source = Column(String(15), nullable=False)  # 'deribit' or 'tastytrade'
-    is_active = Column(Boolean, default=True)
     last_fetched_at = Column(DateTime(timezone=True))
     last_spot = Column(Numeric(18, 4))
     last_snapshot_count = Column(Integer, default=0)
@@ -45,14 +44,9 @@ class Contract(Base):
     strike = Column(Numeric(18, 4), nullable=False)
     expiry = Column(Date, nullable=False)
     option_type = Column(String(1), nullable=False)  # 'C' or 'P'
-    is_watchlisted = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     snapshots = relationship("Snapshot", back_populates="contract", cascade="all, delete-orphan")
-
-    __table_args__ = (
-        Index("ix_contracts_underlying_watchlisted", "underlying", "is_watchlisted"),
-    )
 
 
 class Snapshot(Base):

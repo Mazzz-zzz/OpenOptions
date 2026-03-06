@@ -20,11 +20,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 export const api = {
 	// Underlyings
 	getUnderlyings() {
-		return request<{ data: TrackedUnderlying[] }>('GET', '/underlyings');
-	},
-
-	removeUnderlying(symbol: string) {
-		return request<{ symbol: string; is_active: boolean }>('DELETE', `/underlyings/${symbol}`);
+		return request<{ data: FetchedUnderlying[] }>('GET', '/underlyings');
 	},
 
 	// Fetch
@@ -48,21 +44,12 @@ export const api = {
 	},
 
 	// Contracts
-	getContracts(params?: { underlying?: string; watchlisted?: boolean; limit?: number }) {
+	getContracts(params?: { underlying?: string; limit?: number }) {
 		const query = new URLSearchParams();
 		if (params?.underlying) query.set('underlying', params.underlying);
-		if (params?.watchlisted !== undefined) query.set('watchlisted', String(params.watchlisted));
 		if (params?.limit) query.set('limit', String(params.limit));
 		const qs = query.toString();
 		return request<{ data: Contract[]; total: number }>('GET', `/contracts${qs ? `?${qs}` : ''}`);
-	},
-
-	watchContract(id: number) {
-		return request<{ id: number; is_watchlisted: boolean }>('POST', `/contracts/${id}/watch`);
-	},
-
-	unwatchContract(id: number) {
-		return request<{ id: number; is_watchlisted: boolean }>('DELETE', `/contracts/${id}/watch`);
 	},
 
 	// Surface
@@ -85,16 +72,14 @@ export const api = {
 };
 
 // Types
-export interface TrackedUnderlying {
+export interface FetchedUnderlying {
 	symbol: string;
 	market: string;
 	source: string;
-	is_active: boolean;
 	last_fetched_at: string | null;
 	last_spot: number | null;
 	last_snapshot_count: number;
 	last_alert_count: number;
-	on_cooldown: boolean;
 }
 
 export interface Alert {
@@ -131,7 +116,6 @@ export interface Contract {
 	strike: number;
 	expiry: string;
 	option_type: string;
-	is_watchlisted: boolean;
 }
 
 export interface SurfaceData {

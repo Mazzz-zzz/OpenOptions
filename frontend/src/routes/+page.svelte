@@ -1,6 +1,5 @@
 <script lang="ts">
 	import SymbolSearch from '$lib/components/SymbolSearch.svelte';
-	import TrackedSymbols from '$lib/components/TrackedSymbols.svelte';
 	import AlertTable from '$lib/components/AlertTable.svelte';
 	import { api } from '$lib/api';
 	import { alerts } from '$lib/stores';
@@ -10,7 +9,6 @@
 	let loading = $state(false);
 	let result = $state<{ snapshots: number; alerts_raised: number; source?: string } | null>(null);
 	let error = $state<string | null>(null);
-	let trackedRef: TrackedSymbols;
 
 	onMount(() => {
 		alerts.refresh();
@@ -24,16 +22,11 @@
 		try {
 			result = await api.fetchChain(symbol);
 			await alerts.refresh();
-			trackedRef?.refresh();
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Fetch failed';
 		} finally {
 			loading = false;
 		}
-	}
-
-	function selectTracked(sym: string) {
-		symbol = sym;
 	}
 </script>
 
@@ -53,8 +46,6 @@
 			{/if}
 		</div>
 	</header>
-
-	<TrackedSymbols bind:this={trackedRef} onselect={selectTracked} />
 
 	{#if $alerts.loading && $alerts.items.length === 0}
 		<p class="status">Loading alerts...</p>

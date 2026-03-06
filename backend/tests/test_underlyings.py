@@ -1,4 +1,4 @@
-"""Tests for the underlyings tracking endpoints."""
+"""Tests for the underlyings endpoints."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -29,7 +29,7 @@ class TestListUnderlyings:
         assert resp.status_code == 200
         assert resp.json()["data"] == []
 
-    def test_list_returns_tracked(self, client, db):
+    def test_list_returns_underlyings(self, client, db):
         _make_underlying(db, "BTC", datetime.now(timezone.utc) - timedelta(minutes=10))
         _make_underlying(db, "SPY", datetime.now(timezone.utc) - timedelta(minutes=3))
         resp = client.get("/api/underlyings")
@@ -39,42 +39,6 @@ class TestListUnderlyings:
         # SPY fetched more recently, should be first
         assert data[0]["symbol"] == "SPY"
         assert data[1]["symbol"] == "BTC"
-
-    def test_list_hides_inactive(self, client, db):
-        u = _make_underlying(db, "BTC")
-        u.is_active = False
-        db.flush()
-        resp = client.get("/api/underlyings")
-        assert resp.json()["data"] == []
-
-    def test_list_shows_inactive_when_requested(self, client, db):
-        u = _make_underlying(db, "BTC")
-        u.is_active = False
-        db.flush()
-        resp = client.get("/api/underlyings?active_only=false")
-        assert len(resp.json()["data"]) == 1
-
-    def test_cooldown_flag(self, client, db):
-        _make_underlying(db, "BTC", datetime.now(timezone.utc) - timedelta(minutes=1))
-        _make_underlying(db, "SPY", datetime.now(timezone.utc) - timedelta(minutes=10))
-        resp = client.get("/api/underlyings")
-        data = {item["symbol"]: item for item in resp.json()["data"]}
-        assert data["BTC"]["on_cooldown"] is True
-        assert data["SPY"]["on_cooldown"] is False
-
-
-class TestRemoveUnderlying:
-    def test_remove_deactivates(self, client, db):
-        _make_underlying(db, "BTC")
-        resp = client.delete("/api/underlyings/BTC")
-        assert resp.status_code == 200
-        assert resp.json()["is_active"] is False
-        row = db.query(Underlying).filter(Underlying.symbol == "BTC").first()
-        assert row.is_active is False
-
-    def test_remove_not_found(self, client):
-        resp = client.delete("/api/underlyings/NOPE")
-        assert resp.status_code == 404
 
 
 class TestFetchCooldown:
@@ -103,7 +67,7 @@ class TestFetchCooldown:
 
             resp = client.post("/api/fetch/BTC")
 
-        # Empty chain → 404 (not 429)
+        # Empty chain -> 404 (not 429)
         assert resp.status_code == 404
 
     def test_force_bypasses_cooldown(self, client, db):
@@ -117,7 +81,7 @@ class TestFetchCooldown:
 
             resp = client.post("/api/fetch/BTC?force=true")
 
-        # Empty chain → 404 (not 429)
+        # Empty chain -> 404 (not 429)
         assert resp.status_code == 404
 
 

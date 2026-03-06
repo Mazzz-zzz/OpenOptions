@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { api, type Contract } from '$lib/api';
+	import { type Contract } from '$lib/api';
 	import { contracts, loadContracts } from '$lib/stores';
 	import { onMount } from 'svelte';
 
@@ -9,10 +9,9 @@
 	let search = $state('');
 	let filterUnderlying = $state('');
 	let filterType = $state('');
-	let filterWatchlisted = $state<string>('');
 
 	onMount(() => {
-		loadContracts({ underlying: undefined, watchlisted: undefined });
+		loadContracts();
 	});
 
 	function getDte(expiry: string): number {
@@ -47,11 +46,6 @@
 		if (filterType) {
 			items = items.filter(c => c.option_type === filterType);
 		}
-		if (filterWatchlisted === 'true') {
-			items = items.filter(c => c.is_watchlisted);
-		} else if (filterWatchlisted === 'false') {
-			items = items.filter(c => !c.is_watchlisted);
-		}
 
 		const dir = sortDir === 'asc' ? 1 : -1;
 		items = [...items].sort((a, b) => {
@@ -61,7 +55,6 @@
 			if (av == null) return 1;
 			if (bv == null) return -1;
 			if (typeof av === 'string') return av.localeCompare(bv as string) * dir;
-			if (typeof av === 'boolean') return ((av ? 1 : 0) - (bv as number)) * dir;
 			return ((av as number) - (bv as number)) * dir;
 		});
 
@@ -69,22 +62,6 @@
 	});
 
 	let underlyings = $derived([...new Set($contracts.items.map(c => c.underlying))].sort());
-
-	let toggling = $state<number | null>(null);
-
-	async function toggleWatch(contract: Contract) {
-		toggling = contract.id;
-		try {
-			if (contract.is_watchlisted) {
-				await api.unwatchContract(contract.id);
-			} else {
-				await api.watchContract(contract.id);
-			}
-			await loadContracts();
-		} finally {
-			toggling = null;
-		}
-	}
 </script>
 
 <div class="contracts-page">
@@ -105,11 +82,6 @@
 			<option value="C">Calls</option>
 			<option value="P">Puts</option>
 		</select>
-		<select bind:value={filterWatchlisted} title="Filter by watchlist status — watchlisted contracts are tracked for alerts">
-			<option value="">All</option>
-			<option value="true">Watchlisted</option>
-			<option value="false">Not Watchlisted</option>
-		</select>
 		<span class="count" title="Number of contracts shown after filters / total contracts">{filtered.length} of {$contracts.total}</span>
 	</div>
 
@@ -117,14 +89,13 @@
 		<table>
 			<thead>
 				<tr>
-					<th class="sortable" onclick={() => toggleSort('symbol')} title="Option contract ticker (e.g. BTC-27MAR26-85000-C). Click to sort.">Symbol{sortIndicator('symbol')}</th>
-					<th class="sortable" onclick={() => toggleSort('underlying')} title="The base asset this option derives from (e.g. BTC, ETH). Click to sort.">Underlying{sortIndicator('underlying')}</th>
-					<th class="sortable num" onclick={() => toggleSort('strike')} title="Strike price — the price at which the option can be exercised, in USD. Click to sort.">Strike{sortIndicator('strike')}</th>
-					<th class="sortable" onclick={() => toggleSort('expiry')} title="Expiration date — when the option contract expires. Click to sort.">Expiry{sortIndicator('expiry')}</th>
-					<th class="sortable num" onclick={() => toggleSort('dte')} title="Days to expiry — calendar days remaining. Click to sort.">DTE{sortIndicator('dte')}</th>
-					<th class="sortable" onclick={() => toggleSort('option_type')} title="C = Call (right to buy the underlying), P = Put (right to sell). Click to sort.">Type{sortIndicator('option_type')}</th>
-					<th title="Data source — the exchange providing market data (e.g. Deribit, Tradier)">Source</th>
-					<th class="sortable" onclick={() => toggleSort('is_watchlisted')} title="Watchlist status — watchlisted contracts are actively monitored for mispricing alerts. Click ★/☆ to toggle.">Watch{sortIndicator('is_watchlisted')}</th>
+					<th class="sortable" onclick={() => toggleSort('symbol')} title="Option contract ticker. Click to sort.">Symbol{sortIndicator('symbol')}</th>
+					<th class="sortable" onclick={() => toggleSort('underlying')} title="The base asset. Click to sort.">Underlying{sortIndicator('underlying')}</th>
+					<th class="sortable num" onclick={() => toggleSort('strike')} title="Strike price in USD. Click to sort.">Strike{sortIndicator('strike')}</th>
+					<th class="sortable" onclick={() => toggleSort('expiry')} title="Expiration date. Click to sort.">Expiry{sortIndicator('expiry')}</th>
+					<th class="sortable num" onclick={() => toggleSort('dte')} title="Days to expiry. Click to sort.">DTE{sortIndicator('dte')}</th>
+					<th class="sortable" onclick={() => toggleSort('option_type')} title="C = Call, P = Put. Click to sort.">Type{sortIndicator('option_type')}</th>
+					<th title="Data source exchange">Source</th>
 				</tr>
 			</thead>
 			<tbody>
@@ -138,17 +109,6 @@
 						<td class="num" class:dte-urgent={dte <= 3} class:dte-warn={dte > 3 && dte <= 7}>{dte}d</td>
 						<td>{contract.option_type}</td>
 						<td class="source">{contract.source}</td>
-						<td>
-							<button
-								class="watch-btn"
-								class:watched={contract.is_watchlisted}
-								onclick={() => toggleWatch(contract)}
-								disabled={toggling === contract.id}
-								title={contract.is_watchlisted ? 'Remove from watchlist — stop monitoring for mispricing alerts' : 'Add to watchlist — monitor this contract for mispricing alerts'}
-							>
-								{contract.is_watchlisted ? '★' : '☆'}
-							</button>
-						</td>
 					</tr>
 				{/each}
 			</tbody>
@@ -245,27 +205,6 @@
 	.source {
 		color: #8b949e;
 	}
-
-	.watch-btn {
-		background: none;
-		border: 1px solid transparent;
-		color: #484f58;
-		padding: 0.15rem 0.4rem;
-		border-radius: 4px;
-		cursor: pointer;
-		font-size: 1rem;
-		line-height: 1;
-	}
-
-	.watch-btn:hover:not(:disabled) {
-		color: #58a6ff;
-	}
-
-	.watch-btn.watched {
-		color: #e3b341;
-	}
-
-	.watch-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 	.dte-urgent { color: #f85149; font-weight: 600; }
 	.dte-warn { color: #f0883e; }

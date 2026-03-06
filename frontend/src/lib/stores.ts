@@ -62,7 +62,7 @@ export const contracts = writable<{ items: Contract[]; total: number }>({
 	total: 0,
 });
 
-export async function loadContracts(params?: { underlying?: string; watchlisted?: boolean }) {
+export async function loadContracts(params?: { underlying?: string }) {
 	const res = await api.getContracts({ ...params, limit: 500 });
 	contracts.set({ items: res.data, total: res.total });
 }

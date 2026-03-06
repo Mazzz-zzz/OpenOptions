@@ -98,7 +98,6 @@ class TestContractsEndpoint:
         contract = data["data"][0]
         assert contract["symbol"] == "BTC-27JUN26-100000-C"
         assert contract["underlying"] == "BTC"
-        assert contract["is_watchlisted"] is False
 
     def test_filter_by_underlying(self, client, db):
         db.add(Contract(symbol="BTC-TEST-C", underlying="BTC", market="crypto",
@@ -110,27 +109,6 @@ class TestContractsEndpoint:
         resp = client.get("/api/contracts?underlying=BTC")
         assert resp.json()["total"] == 1
         assert resp.json()["data"][0]["underlying"] == "BTC"
-
-    def test_watch_contract(self, client, sample_contract):
-        resp = client.post(f"/api/contracts/{sample_contract.id}/watch")
-        assert resp.status_code == 200
-        assert resp.json()["is_watchlisted"] is True
-
-        # Verify it's watchlisted
-        resp = client.get("/api/contracts?watchlisted=true")
-        assert resp.json()["total"] == 1
-
-    def test_unwatch_contract(self, client, db, sample_contract):
-        sample_contract.is_watchlisted = True
-        db.flush()
-
-        resp = client.delete(f"/api/contracts/{sample_contract.id}/watch")
-        assert resp.status_code == 200
-        assert resp.json()["is_watchlisted"] is False
-
-    def test_watch_nonexistent_contract(self, client):
-        resp = client.post("/api/contracts/99999/watch")
-        assert resp.status_code == 404
 
 
 class TestSnapshotsEndpoint:

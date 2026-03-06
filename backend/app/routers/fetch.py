@@ -255,7 +255,6 @@ def _upsert_underlying(
         row.last_spot = spot
         row.last_snapshot_count = snapshot_count
         row.last_alert_count = alert_count
-        row.is_active = True
     else:
         db.add(Underlying(
             symbol=symbol,

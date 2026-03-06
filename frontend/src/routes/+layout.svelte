@@ -9,7 +9,7 @@
 			<a href="/" title="Mispricing alerts — options where market IV deviates from the model, sorted by net edge">Dashboard</a>
 			<a href="/surface" title="3D volatility surface — visualize market vs model IV across strikes and expiries">Vol Surface</a>
 			<a href="/iv-crush" title="IV crush analysis — term structure, IV rank, ATM straddle pricing for short vol strategies">IV Crush</a>
-			<a href="/contracts" title="Browse all tracked option contracts — filter, sort, and manage your watchlist">Contracts</a>
+			<a href="/contracts" title="Browse all option contracts — filter and sort">Contracts</a>
 		</div>
 	</nav>
 
