@@ -1,6 +1,36 @@
 import { writable, get } from 'svelte/store';
 import { api, type Alert, type SurfaceData, type Contract } from './api';
 
+// --- Global Selected Underlying ---
+export const selectedUnderlying = writable<string>('');
+export const fetchStatus = writable<{ loading: boolean; result: string | null; error: string | null }>({
+	loading: false,
+	result: null,
+	error: null,
+});
+
+export async function fetchUnderlying(symbol: string) {
+	if (!symbol) return;
+	selectedUnderlying.set(symbol);
+	fetchStatus.set({ loading: true, result: null, error: null });
+	try {
+		const res = await api.fetchChain(symbol);
+		fetchStatus.set({
+			loading: false,
+			result: `${res.alerts_raised} alerts / ${res.snapshots} contracts`,
+			error: null,
+		});
+		// Refresh dependent stores
+		await alerts.refresh();
+	} catch (e) {
+		fetchStatus.set({
+			loading: false,
+			result: null,
+			error: e instanceof Error ? e.message : 'Fetch failed',
+		});
+	}
+}
+
 // --- Alerts Store ---
 function createAlertStore() {
 	const store = writable<{ items: Alert[]; cursor: number | null; hasMore: boolean; loading: boolean }>({

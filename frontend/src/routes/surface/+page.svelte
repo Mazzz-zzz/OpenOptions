@@ -1,40 +1,48 @@
 <script lang="ts">
 	import VolSurface from '$lib/components/VolSurface.svelte';
-	import SymbolSearch from '$lib/components/SymbolSearch.svelte';
-	import { surface, loadSurface } from '$lib/stores';
+	import { surface, loadSurface, selectedUnderlying } from '$lib/stores';
 
-	let selectedUnderlying = $state('BTC');
 	let selectedType = $state('C');
 	let loading = $state(false);
 	let error = $state<string | null>(null);
 
-	async function load() {
-		if (!selectedUnderlying) return;
+	async function load(underlying: string) {
+		if (!underlying) return;
 		loading = true;
 		error = null;
 		try {
-			await loadSurface(selectedUnderlying, selectedType || undefined);
+			await loadSurface(underlying, selectedType || undefined);
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load surface';
 		} finally {
 			loading = false;
 		}
 	}
+
+	// React to global symbol changes
+	$effect(() => {
+		const sym = $selectedUnderlying;
+		if (sym) load(sym);
+	});
 </script>
 
 <div class="surface-page">
 	<header>
 		<h1 title="3D visualization of implied volatility across strikes and expiries — highlights where market IV diverges from the fitted model">Volatility Surface</h1>
 		<div class="controls">
-			<SymbolSearch bind:value={selectedUnderlying} onsubmit={load} placeholder="Symbol..." {loading} />
+			{#if $selectedUnderlying}
+				<span class="current-symbol">{$selectedUnderlying}</span>
+			{:else}
+				<span class="hint">Fetch a symbol from the navbar</span>
+			{/if}
 			<div class="type-toggle" title="View calls or puts separately — mixing them creates overlapping surfaces with different skew profiles">
-				<button class:active={selectedType === 'C'} onclick={() => selectedType = 'C'}>Calls</button>
-				<button class:active={selectedType === 'P'} onclick={() => selectedType = 'P'}>Puts</button>
-				<button class:active={selectedType === ''} onclick={() => selectedType = ''}>Both</button>
+				<button class:active={selectedType === 'C'} onclick={() => { selectedType = 'C'; if ($selectedUnderlying) load($selectedUnderlying); }}>Calls</button>
+				<button class:active={selectedType === 'P'} onclick={() => { selectedType = 'P'; if ($selectedUnderlying) load($selectedUnderlying); }}>Puts</button>
+				<button class:active={selectedType === ''} onclick={() => { selectedType = ''; if ($selectedUnderlying) load($selectedUnderlying); }}>Both</button>
 			</div>
-			<button onclick={load} disabled={loading} class="load-btn" title="Load the latest volatility surface data — fits an SVI model to market IVs and compares market vs model across all strikes/expiries">
-				{loading ? 'Loading...' : 'Load Surface'}
-			</button>
+			{#if loading}
+				<span class="loading">Loading...</span>
+			{/if}
 		</div>
 	</header>
 
@@ -45,7 +53,7 @@
 	{#if $surface}
 		<VolSurface surfaceData={$surface} />
 	{:else if !loading}
-		<p class="placeholder">Select an underlying and click Load Surface to view the vol surface.</p>
+		<p class="placeholder">Fetch a symbol from the navbar to view the volatility surface.</p>
 	{/if}
 </div>
 
@@ -68,18 +76,24 @@
 		align-items: center;
 	}
 
-	select, .load-btn {
-		background: #21262d;
-		color: #c9d1d9;
-		border: 1px solid #30363d;
-		padding: 0.5rem 1rem;
+	.current-symbol {
+		background: #388bfd26;
+		color: #58a6ff;
+		padding: 0.35rem 0.75rem;
 		border-radius: 6px;
-		cursor: pointer;
+		font-weight: 600;
 		font-size: 0.875rem;
 	}
 
-	.load-btn:hover:not(:disabled) { background: #30363d; }
-	.load-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+	.hint {
+		color: #484f58;
+		font-size: 0.8rem;
+	}
+
+	.loading {
+		color: #8b949e;
+		font-size: 0.8rem;
+	}
 
 	.type-toggle {
 		display: flex;

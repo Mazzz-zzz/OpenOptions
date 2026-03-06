@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { type Contract } from '$lib/api';
-	import { contracts, loadContracts } from '$lib/stores';
+	import { contracts, loadContracts, selectedUnderlying } from '$lib/stores';
 	import { onMount } from 'svelte';
 
 	type SortKey = keyof Contract | 'dte';
@@ -12,6 +12,14 @@
 
 	onMount(() => {
 		loadContracts();
+	});
+
+	// Reload contracts when global symbol changes
+	$effect(() => {
+		const sym = $selectedUnderlying;
+		if (sym) {
+			loadContracts({ underlying: sym });
+		}
 	});
 
 	function getDte(expiry: string): number {

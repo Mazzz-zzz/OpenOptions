@@ -1,9 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { api, type IvAnalysisData } from '$lib/api';
-	import SymbolSearch from '$lib/components/SymbolSearch.svelte';
+	import { selectedUnderlying } from '$lib/stores';
 
-	let selectedUnderlying = $state('BTC');
 	let lookbackDays = $state(30);
 	let loading = $state(false);
 	let error = $state<string | null>(null);
@@ -17,17 +16,24 @@
 		Plotly = mod.default || mod;
 	});
 
-	async function load() {
+	async function load(underlying: string) {
+		if (!underlying) return;
 		loading = true;
 		error = null;
 		try {
-			data = await api.getIvAnalysis(selectedUnderlying, lookbackDays);
+			data = await api.getIvAnalysis(underlying, lookbackDays);
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load IV analysis';
 		} finally {
 			loading = false;
 		}
 	}
+
+	// React to global symbol changes
+	$effect(() => {
+		const sym = $selectedUnderlying;
+		if (sym) load(sym);
+	});
 
 	$effect(() => {
 		if (!Plotly || !data) return;
@@ -56,7 +62,6 @@
 			},
 		];
 
-		// Model IV line if available
 		const modelPts = ts.filter(p => p.atm_model_iv !== null);
 		if (modelPts.length > 0) {
 			traces.push({
@@ -72,7 +77,6 @@
 			});
 		}
 
-		// Highlight the "kink" — steepest drop between adjacent expiries
 		if (ts.length >= 2) {
 			let maxDrop = 0;
 			let kinkIdx = -1;
@@ -127,7 +131,6 @@
 			hovertemplate: '%{x}<br>IV: %{y:.2%}<extra></extra>',
 		}];
 
-		// Current IV horizontal line
 		if (currentIv !== null && currentIv !== undefined) {
 			traces.push({
 				type: 'scatter',
@@ -173,17 +176,21 @@
 	<header>
 		<h1 title="IV crush strategies profit when implied volatility drops — typically after events, earnings, or when term structure normalizes">IV Crush Analysis</h1>
 		<div class="controls">
-			<SymbolSearch bind:value={selectedUnderlying} onsubmit={load} placeholder="Symbol..." {loading} />
-			<select bind:value={lookbackDays} title="Historical lookback period for IV rank calculation">
+			{#if $selectedUnderlying}
+				<span class="current-symbol">{$selectedUnderlying}</span>
+			{:else}
+				<span class="hint">Fetch a symbol from the navbar</span>
+			{/if}
+			<select bind:value={lookbackDays} onchange={() => { if ($selectedUnderlying) load($selectedUnderlying); }} title="Historical lookback period for IV rank calculation">
 				<option value={7}>7d lookback</option>
 				<option value={14}>14d lookback</option>
 				<option value={30}>30d lookback</option>
 				<option value={60}>60d lookback</option>
 				<option value={90}>90d lookback</option>
 			</select>
-			<button onclick={load} disabled={loading} class="load-btn">
-				{loading ? 'Loading...' : 'Analyze'}
-			</button>
+			{#if loading}
+				<span class="loading">Loading...</span>
+			{/if}
 		</div>
 	</header>
 
@@ -301,7 +308,7 @@
 			</div>
 		{/if}
 	{:else if !loading}
-		<p class="placeholder">Select an underlying and click Analyze to view IV crush opportunities.</p>
+		<p class="placeholder">Fetch a symbol from the navbar to view IV crush opportunities.</p>
 	{/if}
 </div>
 
@@ -318,7 +325,26 @@
 
 	.controls { display: flex; gap: 0.5rem; align-items: center; }
 
-	select, .load-btn {
+	.current-symbol {
+		background: #388bfd26;
+		color: #58a6ff;
+		padding: 0.35rem 0.75rem;
+		border-radius: 6px;
+		font-weight: 600;
+		font-size: 0.875rem;
+	}
+
+	.hint {
+		color: #484f58;
+		font-size: 0.8rem;
+	}
+
+	.loading {
+		color: #8b949e;
+		font-size: 0.8rem;
+	}
+
+	select {
 		background: #21262d;
 		color: #c9d1d9;
 		border: 1px solid #30363d;
@@ -327,9 +353,6 @@
 		cursor: pointer;
 		font-size: 0.875rem;
 	}
-
-	.load-btn:hover:not(:disabled) { background: #30363d; }
-	.load-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
 	.cards {
 		display: grid;
