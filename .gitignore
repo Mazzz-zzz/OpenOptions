@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+*.egg
+
+# Node
+node_modules/
+.svelte-kit/
+build/
+
+# AWS SAM
+.aws-sam/
+
+# Environment
+.env
+.env.local
+.env.production
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Misc
+.pytest_cache/
+*.txt
+frontend-react/
