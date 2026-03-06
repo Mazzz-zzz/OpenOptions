@@ -107,7 +107,22 @@ async def fetch_chain(
     underlying_price = chain[0].underlying_price
     surfaces = fit_svi_by_expiry(chain, underlying_price)
 
-    # 5. Compute greeks + mispricing per contract
+    # 5. Build map of existing undismissed alerts per contract
+    contract_ids = [c.id for c in contract_map.values()]
+    existing_alerts = (
+        db.query(Alert)
+        .join(Alert.snapshot)
+        .filter(Snapshot.contract_id.in_(contract_ids), Alert.dismissed == False)
+        .all()
+    )
+    # {contract_id: Alert} — latest undismissed alert per contract
+    alert_by_contract = {}
+    for a in existing_alerts:
+        cid = a.snapshot.contract_id
+        if cid not in alert_by_contract or a.id > alert_by_contract[cid].id:
+            alert_by_contract[cid] = a
+
+    # 6. Compute greeks + mispricing per contract
     snapshots = []
     alerts_raised = 0
 
@@ -176,7 +191,7 @@ async def fetch_chain(
         db.add(snap)
         snapshots.append(snap)
 
-        # 6. Detect mispricing signals
+        # 7. Detect mispricing signals
         if (
             model_iv is not None
             and quote.market_iv
@@ -195,14 +210,28 @@ async def fetch_chain(
                 vol_threshold=settings.vol_threshold / 100.0,  # convert vol points to decimal
             )
             if signal:
-                db.add(Alert(
-                    snapshot=snap,
-                    signal_type=signal.signal_type,
-                    confidence=signal.confidence,
-                ))
+                prev = alert_by_contract.get(contract.id)
+                if prev:
+                    # Update existing alert to point at latest snapshot
+                    prev.snapshot = snap
+                    prev.signal_type = signal.signal_type
+                    prev.confidence = signal.confidence
+                else:
+                    new_alert = Alert(
+                        snapshot=snap,
+                        signal_type=signal.signal_type,
+                        confidence=signal.confidence,
+                    )
+                    db.add(new_alert)
+                    alert_by_contract[contract.id] = new_alert
                 alerts_raised += 1
+            else:
+                # Signal cleared — auto-dismiss stale alert
+                prev = alert_by_contract.pop(contract.id, None)
+                if prev:
+                    prev.dismissed = True
 
-    # 7. Upsert underlying tracking record
+    # 8. Upsert underlying tracking record
     _upsert_underlying(db, underlying, market, source, underlying_price, len(snapshots), alerts_raised)
 
     db.commit()

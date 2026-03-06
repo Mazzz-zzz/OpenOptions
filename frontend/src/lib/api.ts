@@ -169,7 +169,11 @@ export interface SnapshotData {
 export interface IvAnalysisData {
 	spot: number | null;
 	term_structure: TermStructurePoint[];
+	ts_slope: number | null;
+	skew_by_expiry: SkewByExpiry[];
+	smile: SmilePoint[];
 	straddles: StraddleData[];
+	put_call_summary: PutCallSummary | null;
 	iv_rank: IvRankData | null;
 	historical_iv: { ts: string; iv: number }[];
 }
@@ -182,10 +186,44 @@ export interface TermStructurePoint {
 	atm_strike: number;
 }
 
+export interface SkewByExpiry {
+	expiry: string;
+	dte: number;
+	atm_iv: number;
+	put_25d_iv: number | null;
+	call_25d_iv: number | null;
+	put_10d_iv: number | null;
+	call_10d_iv: number | null;
+	risk_reversal: number | null;
+	butterfly: number | null;
+	avg_deviation: number | null;
+	max_deviation: number | null;
+	contracts_with_edge: number;
+	total_contracts: number;
+	total_vega: number;
+}
+
+export interface SmilePoint {
+	expiry: string;
+	dte: number;
+	strike: number;
+	moneyness: number;
+	delta: number;
+	option_type: string;
+	market_iv: number;
+	model_iv: number | null;
+	deviation: number | null;
+	net_edge: number | null;
+	vega: number | null;
+}
+
 export interface StraddleData {
 	expiry: string;
 	dte: number;
 	atm_strike: number;
+	atm_iv: number;
+	atm_model_iv: number | null;
+	vol_premium: number | null;
 	call_mid: number;
 	put_mid: number;
 	straddle_price: number;
@@ -195,7 +233,19 @@ export interface StraddleData {
 	total_spread: number;
 	total_theta: number | null;
 	total_vega: number | null;
-	atm_iv: number;
+	total_gamma: number | null;
+	theta_vega_ratio: number | null;
+	risk_reversal: number | null;
+}
+
+export interface PutCallSummary {
+	avg_put_iv: number | null;
+	avg_call_iv: number | null;
+	put_call_iv_spread: number | null;
+	total_put_vega: number;
+	total_call_vega: number;
+	put_count: number;
+	call_count: number;
 }
 
 export interface IvRankData {
