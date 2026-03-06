@@ -4,15 +4,13 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 import httpx
 
 API_URL = "https://api.tastyworks.com"
 API_VERSION = "20251101"
 BATCH_SIZE = 100
-MAX_DTE = 60
-MONEYNESS_RANGE = (0.85, 1.15)
 MAX_CONCURRENT = 5
 
 logger = logging.getLogger(__name__)
@@ -71,20 +69,14 @@ class TastytradeClient:
 
         all_options = await self._get_option_chain(underlying)
 
-        # Filter to manageable set: near-term, near-the-money
-        cutoff = date.today() + timedelta(days=MAX_DTE)
-        lo = stock_price * MONEYNESS_RANGE[0]
-        hi = stock_price * MONEYNESS_RANGE[1]
+        # Filter out expired contracts only — keep everything else
         options = []
         for opt in all_options:
-            strike = float(opt.get("strike-price", 0))
             exp_str = opt.get("expiration-date", "")
             if not exp_str:
                 continue
             exp = datetime.strptime(exp_str, "%Y-%m-%d").date()
-            if exp <= date.today() or exp > cutoff:
-                continue
-            if strike < lo or strike > hi:
+            if exp <= date.today():
                 continue
             options.append(opt)
 
@@ -175,6 +167,77 @@ class TastytradeClient:
 
         await asyncio.gather(*tasks)
         return result
+
+    async def fetch_market_metrics(self, symbol: str) -> dict | None:
+        """Fetch IV rank, IV percentile, liquidity from /market-metrics."""
+        resp = await self._http.get(
+            "/market-metrics",
+            params={"symbols": symbol.upper()},
+        )
+        if resp.status_code != 200:
+            logger.warning(f"Market metrics failed for {symbol}: {resp.status_code}")
+            return None
+        data = resp.json()
+        items = data.get("data", {}).get("items", [])
+        if not items:
+            return None
+        item = items[0]
+        return {
+            "iv_index": float(item["implied-volatility-index"]) if item.get("implied-volatility-index") else None,
+            "iv_index_5d_change": float(item["implied-volatility-index-5-day-change"]) if item.get("implied-volatility-index-5-day-change") else None,
+            "iv_rank": float(item["implied-volatility-rank"]) if item.get("implied-volatility-rank") else None,
+            "iv_percentile": float(item["implied-volatility-percentile"]) if item.get("implied-volatility-percentile") else None,
+            "liquidity": float(item["liquidity"]) if item.get("liquidity") else None,
+            "liquidity_rank": float(item["liquidity-rank"]) if item.get("liquidity-rank") else None,
+            "liquidity_rating": int(item["liquidity-rating"]) if item.get("liquidity-rating") else None,
+            "expiry_ivs": [
+                {
+                    "expiry": e.get("expiration-date", ""),
+                    "settlement_type": e.get("settlement-type"),
+                    "option_chain_type": e.get("option-chain-type"),
+                    "iv": float(e["implied-volatility"]) if e.get("implied-volatility") else None,
+                }
+                for e in item.get("option-expiration-implied-volatilities", [])
+            ],
+        }
+
+    async def fetch_earnings(self, symbol: str) -> list[dict]:
+        """Fetch historical earnings reports."""
+        resp = await self._http.get(
+            f"/market-metrics/historic-corporate-events/earnings-reports/{symbol.upper()}",
+        )
+        if resp.status_code != 200:
+            logger.warning(f"Earnings fetch failed for {symbol}: {resp.status_code}")
+            return []
+        data = resp.json()
+        items = data.get("data", {}).get("items", [])
+        return [
+            {
+                "occurred_date": item["occurred-date"],
+                "eps": float(item["eps"]) if item.get("eps") is not None else None,
+            }
+            for item in items
+            if item.get("occurred-date")
+        ]
+
+    async def fetch_dividends(self, symbol: str) -> list[dict]:
+        """Fetch historical dividend data."""
+        resp = await self._http.get(
+            f"/market-metrics/historic-corporate-events/dividends/{symbol.upper()}",
+        )
+        if resp.status_code != 200:
+            logger.warning(f"Dividends fetch failed for {symbol}: {resp.status_code}")
+            return []
+        data = resp.json()
+        items = data.get("data", {}).get("items", [])
+        return [
+            {
+                "occurred_date": item["occurred-date"],
+                "amount": float(item["amount"]) if item.get("amount") is not None else None,
+            }
+            for item in items
+            if item.get("occurred-date")
+        ]
 
     async def close(self):
         await self._http.aclose()

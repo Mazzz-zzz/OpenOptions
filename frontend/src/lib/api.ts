@@ -176,6 +176,29 @@ export interface IvAnalysisData {
 	put_call_summary: PutCallSummary | null;
 	iv_rank: IvRankData | null;
 	historical_iv: { ts: string; iv: number }[];
+	market_metrics: MarketMetrics | null;
+	earnings: EarningEvent[];
+	dividends: DividendEvent[];
+}
+
+export interface MarketMetrics {
+	iv_index: number | null;
+	iv_index_5d_change: number | null;
+	iv_rank: number | null;
+	iv_percentile: number | null;
+	liquidity: number | null;
+	liquidity_rank: number | null;
+	liquidity_rating: number | null;
+}
+
+export interface EarningEvent {
+	date: string;
+	eps: number | null;
+}
+
+export interface DividendEvent {
+	date: string;
+	amount: number | null;
 }
 
 export interface TermStructurePoint {

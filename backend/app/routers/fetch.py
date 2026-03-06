@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.database import get_db
-from app.models import Alert, Contract, Snapshot, Underlying
+from app.models import Alert, Contract, Dividend, Earning, Snapshot, Underlying
 from app.services.detector import classify_mispricing
 from app.services.deribit import DeribitClient
 from app.services.pricing import (
@@ -80,8 +80,27 @@ async def fetch_chain(
             settings.tastytrade_refresh_token,
         )
 
+    market_metrics = None
+    earnings_data = []
+    dividends_data = []
+
     try:
         chain = await client.fetch_chain(underlying)
+
+        # Fetch market metrics, earnings, dividends (equity only, non-fatal)
+        if not is_crypto and isinstance(client, TastytradeClient):
+            try:
+                market_metrics = await client.fetch_market_metrics(underlying)
+            except Exception as e:
+                logger.warning(f"Market metrics failed for {underlying}: {e}")
+            try:
+                earnings_data = await client.fetch_earnings(underlying)
+            except Exception as e:
+                logger.warning(f"Earnings fetch failed for {underlying}: {e}")
+            try:
+                dividends_data = await client.fetch_dividends(underlying)
+            except Exception as e:
+                logger.warning(f"Dividends fetch failed for {underlying}: {e}")
     except HTTPException:
         raise
     except Exception as e:
@@ -231,8 +250,17 @@ async def fetch_chain(
                 if prev:
                     prev.dismissed = True
 
-    # 8. Upsert underlying tracking record
-    _upsert_underlying(db, underlying, market, source, underlying_price, len(snapshots), alerts_raised)
+    # 8. Upsert underlying tracking record + market metrics
+    underlying_row = _upsert_underlying(
+        db, underlying, market, source, underlying_price,
+        len(snapshots), alerts_raised, market_metrics,
+    )
+
+    # 9. Upsert earnings and dividends
+    if underlying_row and earnings_data:
+        _upsert_earnings(db, underlying_row.id, earnings_data)
+    if underlying_row and dividends_data:
+        _upsert_dividends(db, underlying_row.id, dividends_data)
 
     db.commit()
 
@@ -275,7 +303,8 @@ def _upsert_contracts(
 def _upsert_underlying(
     db: Session, symbol: str, market: str, source: str,
     spot: float, snapshot_count: int, alert_count: int,
-) -> None:
+    metrics: dict | None = None,
+) -> Underlying:
     """Create or update the Underlying tracking record."""
     row = db.query(Underlying).filter(Underlying.symbol == symbol).first()
     now = datetime.now(timezone.utc)
@@ -285,7 +314,7 @@ def _upsert_underlying(
         row.last_snapshot_count = snapshot_count
         row.last_alert_count = alert_count
     else:
-        db.add(Underlying(
+        row = Underlying(
             symbol=symbol,
             market=market,
             source=source,
@@ -293,4 +322,43 @@ def _upsert_underlying(
             last_spot=spot,
             last_snapshot_count=snapshot_count,
             last_alert_count=alert_count,
-        ))
+        )
+        db.add(row)
+
+    if metrics:
+        row.iv_index = metrics.get("iv_index")
+        row.iv_index_5d_change = metrics.get("iv_index_5d_change")
+        row.iv_rank = metrics.get("iv_rank")
+        row.iv_percentile = metrics.get("iv_percentile")
+        row.liquidity = metrics.get("liquidity")
+        row.liquidity_rank = metrics.get("liquidity_rank")
+        row.liquidity_rating = metrics.get("liquidity_rating")
+
+    db.flush()
+    return row
+
+
+def _upsert_earnings(db: Session, underlying_id: int, earnings: list[dict]) -> None:
+    """Insert earnings records, skipping duplicates."""
+    existing = {
+        e.occurred_date
+        for e in db.query(Earning.occurred_date).filter(Earning.underlying_id == underlying_id).all()
+    }
+    for e in earnings:
+        d = date.fromisoformat(e["occurred_date"]) if isinstance(e["occurred_date"], str) else e["occurred_date"]
+        if d not in existing:
+            db.add(Earning(underlying_id=underlying_id, occurred_date=d, eps=e.get("eps")))
+            existing.add(d)
+
+
+def _upsert_dividends(db: Session, underlying_id: int, dividends: list[dict]) -> None:
+    """Insert dividend records, skipping duplicates."""
+    existing = {
+        d.occurred_date
+        for d in db.query(Dividend.occurred_date).filter(Dividend.underlying_id == underlying_id).all()
+    }
+    for div in dividends:
+        d = date.fromisoformat(div["occurred_date"]) if isinstance(div["occurred_date"], str) else div["occurred_date"]
+        if d not in existing:
+            db.add(Dividend(underlying_id=underlying_id, occurred_date=d, amount=div.get("amount")))
+            existing.add(d)

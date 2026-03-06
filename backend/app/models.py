@@ -32,6 +32,48 @@ class Underlying(Base):
     last_alert_count = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    # Market metrics from Tastytrade
+    iv_index = Column(Numeric(18, 6))
+    iv_index_5d_change = Column(Numeric(18, 6))
+    iv_rank = Column(Numeric(8, 2))
+    iv_percentile = Column(Numeric(8, 2))
+    liquidity = Column(Numeric(18, 4))
+    liquidity_rank = Column(Numeric(18, 4))
+    liquidity_rating = Column(Integer)
+
+    earnings = relationship("Earning", back_populates="underlying_rel", cascade="all, delete-orphan")
+    dividends = relationship("Dividend", back_populates="underlying_rel", cascade="all, delete-orphan")
+
+
+class Earning(Base):
+    __tablename__ = "earnings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    underlying_id = Column(Integer, ForeignKey("underlyings.id", ondelete="CASCADE"), nullable=False)
+    occurred_date = Column(Date, nullable=False)
+    eps = Column(Numeric(12, 4))
+
+    underlying_rel = relationship("Underlying", back_populates="earnings")
+
+    __table_args__ = (
+        Index("ix_earnings_underlying_date", "underlying_id", "occurred_date", unique=True),
+    )
+
+
+class Dividend(Base):
+    __tablename__ = "dividends"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    underlying_id = Column(Integer, ForeignKey("underlyings.id", ondelete="CASCADE"), nullable=False)
+    occurred_date = Column(Date, nullable=False)
+    amount = Column(Numeric(12, 6))
+
+    underlying_rel = relationship("Underlying", back_populates="dividends")
+
+    __table_args__ = (
+        Index("ix_dividends_underlying_date", "underlying_id", "occurred_date", unique=True),
+    )
+
 
 class Contract(Base):
     __tablename__ = "contracts"

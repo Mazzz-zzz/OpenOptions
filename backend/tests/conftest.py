@@ -6,6 +6,7 @@ from datetime import date, timedelta
 from typing import Generator
 
 import pytest
+import sqlalchemy
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -29,6 +30,14 @@ def engine():
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
     )
+
+    # Register PostgreSQL-specific functions for SQLite compatibility
+    import sqlite3
+    @sqlalchemy.event.listens_for(engine, "connect")
+    def _register_functions(dbapi_conn, connection_record):
+        if isinstance(dbapi_conn, sqlite3.Connection):
+            dbapi_conn.create_function("date_trunc", 2, lambda precision, dt: dt)
+
     Base.metadata.create_all(engine)
     return engine
 

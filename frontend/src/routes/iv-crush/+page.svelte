@@ -308,6 +308,9 @@
 		const pts = v * 100;
 		return (pts >= 0 ? '+' : '') + pts.toFixed(1);
 	}
+
+	let ivRankDisplay = $derived(data?.market_metrics?.iv_rank ?? data?.iv_rank?.rank ?? null);
+	let ivPctlDisplay = $derived(data?.market_metrics?.iv_percentile ?? data?.iv_rank?.percentile ?? null);
 </script>
 
 <div class="crush-page">
@@ -389,23 +392,41 @@
 				</div>
 			{/if}
 
-			{#if data.iv_rank}
-				<div class="card rank-card" title="IV Rank: where current IV sits within its {data.iv_rank.lookback_days}d range">
-					<div class="card-label">IV Rank ({data.iv_rank.lookback_days}d)</div>
-					{#if data.iv_rank.rank !== null}
-						<div class="card-value" style="color: {rankColor(data.iv_rank.rank)}">
-							{data.iv_rank.rank.toFixed(0)}%
-						</div>
-						<div class="rank-bar">
-							<div class="rank-fill" style="width: {data.iv_rank.rank}%; background: {rankColor(data.iv_rank.rank)}"></div>
-						</div>
-						<div class="card-sub">
-							{fmtIv(data.iv_rank.low)} — {fmtIv(data.iv_rank.high)} range
-						</div>
-					{:else}
-						<div class="card-value muted">—</div>
-						<div class="card-sub">Fetch more to build history</div>
-					{/if}
+			<div class="card rank-card" title="IV Rank: where current IV sits relative to its historical range">
+				<div class="card-label">IV Rank / Pctl</div>
+				{#if ivRankDisplay !== null}
+					<div class="card-value" style="color: {rankColor(ivRankDisplay)}">
+						{ivRankDisplay.toFixed(0)}%
+					</div>
+					<div class="rank-bar">
+						<div class="rank-fill" style="width: {ivRankDisplay}%; background: {rankColor(ivRankDisplay)}"></div>
+					</div>
+					<div class="card-sub">
+						{ivPctlDisplay !== null ? `Pctl: ${ivPctlDisplay.toFixed(0)}%` : ''}
+						{#if data.market_metrics?.iv_index !== null && data.market_metrics?.iv_index !== undefined}
+							{ivPctlDisplay !== null ? ' · ' : ''}IV Index: {(data.market_metrics.iv_index * 100).toFixed(1)}%
+							{#if data.market_metrics.iv_index_5d_change !== null && data.market_metrics.iv_index_5d_change !== undefined}
+								<span class:rich={data.market_metrics.iv_index_5d_change > 0} class:cheap={data.market_metrics.iv_index_5d_change < 0}>
+									({data.market_metrics.iv_index_5d_change > 0 ? '+' : ''}{(data.market_metrics.iv_index_5d_change * 100).toFixed(1)} 5d)
+								</span>
+							{/if}
+						{:else if data.iv_rank}
+							{ivPctlDisplay !== null ? ' · ' : ''}{fmtIv(data.iv_rank.low)} — {fmtIv(data.iv_rank.high)}
+						{/if}
+					</div>
+				{:else}
+					<div class="card-value muted">—</div>
+					<div class="card-sub">Fetch to build history</div>
+				{/if}
+			</div>
+
+			{#if data.market_metrics?.liquidity_rating !== null && data.market_metrics?.liquidity_rating !== undefined}
+				<div class="card" title="Tastytrade liquidity rating (1-5 stars, higher = more liquid)">
+					<div class="card-label">Liquidity</div>
+					<div class="card-value">
+						{'★'.repeat(Math.min(data.market_metrics.liquidity_rating, 5))}{'☆'.repeat(Math.max(0, 5 - data.market_metrics.liquidity_rating))}
+					</div>
+					<div class="card-sub">Rating {data.market_metrics.liquidity_rating}/5</div>
 				</div>
 			{/if}
 
@@ -529,6 +550,63 @@
 							{/each}
 						</tbody>
 					</table>
+				</div>
+			</div>
+		{/if}
+
+		<!-- Earnings & Dividends -->
+		{#if data.earnings.length > 0 || data.dividends.length > 0}
+			<div class="section corporate-events">
+				<div class="events-row">
+					{#if data.earnings.length > 0}
+						<div class="event-table">
+							<h2>Earnings History</h2>
+							<div class="table-wrapper">
+								<table>
+									<thead>
+										<tr>
+											<th>Date</th>
+											<th class="num">EPS</th>
+										</tr>
+									</thead>
+									<tbody>
+										{#each data.earnings.slice(0, 12) as e}
+											<tr>
+												<td class="mono">{e.date}</td>
+												<td class="num" class:positive={e.eps !== null && e.eps > 0} class:negative-eps={e.eps !== null && e.eps < 0}>
+													{e.eps !== null ? '$' + e.eps.toFixed(2) : '—'}
+												</td>
+											</tr>
+										{/each}
+									</tbody>
+								</table>
+							</div>
+						</div>
+					{/if}
+
+					{#if data.dividends.length > 0}
+						<div class="event-table">
+							<h2>Dividend History</h2>
+							<div class="table-wrapper">
+								<table>
+									<thead>
+										<tr>
+											<th>Date</th>
+											<th class="num">Amount</th>
+										</tr>
+									</thead>
+									<tbody>
+										{#each data.dividends.slice(0, 12) as d}
+											<tr>
+												<td class="mono">{d.date}</td>
+												<td class="num">{d.amount !== null ? '$' + d.amount.toFixed(4) : '—'}</td>
+											</tr>
+										{/each}
+									</tbody>
+								</table>
+							</div>
+						</div>
+					{/if}
 				</div>
 			</div>
 		{/if}
@@ -720,11 +798,29 @@
 	.dte-urgent { color: #f85149; font-weight: 600; }
 	.dte-warn { color: #f0883e; }
 
+	.negative-eps { color: #f85149; }
+
+	.events-row {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 1rem;
+	}
+
+	.event-table {
+		background: #161b22;
+		border: 1px solid #30363d;
+		border-radius: 8px;
+		padding: 0.75rem;
+	}
+
+	.event-table h2 { margin-bottom: 0.5rem; }
+
 	.error { color: #f85149; }
 	.placeholder { color: #8b949e; text-align: center; padding: 3rem; }
 
 	@media (max-width: 900px) {
 		.charts-row { grid-template-columns: 1fr; }
 		.cards { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+		.events-row { grid-template-columns: 1fr; }
 	}
 </style>

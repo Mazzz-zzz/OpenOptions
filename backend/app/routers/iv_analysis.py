@@ -11,7 +11,7 @@ from sqlalchemy import func, and_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Contract, Snapshot
+from app.models import Contract, Dividend, Earning, Snapshot, Underlying
 
 router = APIRouter()
 
@@ -45,6 +45,41 @@ async def get_iv_analysis(
 ):
     underlying = underlying.upper()
 
+    # --- 0. Get underlying record for market metrics, earnings, dividends ---
+    underlying_row = db.query(Underlying).filter(Underlying.symbol == underlying).first()
+
+    market_metrics = None
+    if underlying_row:
+        market_metrics = {
+            "iv_index": float(underlying_row.iv_index) if underlying_row.iv_index is not None else None,
+            "iv_index_5d_change": float(underlying_row.iv_index_5d_change) if underlying_row.iv_index_5d_change is not None else None,
+            "iv_rank": float(underlying_row.iv_rank) if underlying_row.iv_rank is not None else None,
+            "iv_percentile": float(underlying_row.iv_percentile) if underlying_row.iv_percentile is not None else None,
+            "liquidity": float(underlying_row.liquidity) if underlying_row.liquidity is not None else None,
+            "liquidity_rank": float(underlying_row.liquidity_rank) if underlying_row.liquidity_rank is not None else None,
+            "liquidity_rating": underlying_row.liquidity_rating,
+        }
+
+    earnings = []
+    dividends = []
+    if underlying_row:
+        earnings = [
+            {"date": e.occurred_date.isoformat(), "eps": float(e.eps) if e.eps is not None else None}
+            for e in db.query(Earning)
+                .filter(Earning.underlying_id == underlying_row.id)
+                .order_by(Earning.occurred_date.desc())
+                .limit(20)
+                .all()
+        ]
+        dividends = [
+            {"date": d.occurred_date.isoformat(), "amount": float(d.amount) if d.amount is not None else None}
+            for d in db.query(Dividend)
+                .filter(Dividend.underlying_id == underlying_row.id)
+                .order_by(Dividend.occurred_date.desc())
+                .limit(20)
+                .all()
+        ]
+
     # --- 1. Get latest snapshot per contract ---
     latest_snap_ids = (
         db.query(func.max(Snapshot.id))
@@ -68,6 +103,8 @@ async def get_iv_analysis(
             "term_structure": [], "skew_by_expiry": [], "smile": [],
             "iv_rank": None, "straddles": [], "spot": None,
             "historical_iv": [], "put_call_summary": None,
+            "market_metrics": market_metrics, "earnings": earnings, "dividends": dividends,
+            "ts_slope": None,
         }
 
     # Estimate spot from nearest ATM
@@ -89,6 +126,8 @@ async def get_iv_analysis(
             "term_structure": [], "skew_by_expiry": [], "smile": [],
             "iv_rank": None, "straddles": [], "spot": None,
             "historical_iv": [], "put_call_summary": None,
+            "market_metrics": market_metrics, "earnings": earnings, "dividends": dividends,
+            "ts_slope": None,
         }
 
     # --- 2. Term structure + skew + straddles per expiry ---
@@ -320,7 +359,10 @@ async def get_iv_analysis(
     )
 
     historical_iv = [
-        {"ts": row.bucket.isoformat() if row.bucket else "", "iv": round(float(row.avg_iv), 6)}
+        {
+            "ts": row.bucket.isoformat() if hasattr(row.bucket, "isoformat") else str(row.bucket or ""),
+            "iv": round(float(row.avg_iv), 6),
+        }
         for row in historical_snaps
         if row.avg_iv is not None
     ]
@@ -365,4 +407,7 @@ async def get_iv_analysis(
             "data_points": len(historical_iv),
         } if current_atm_iv is not None else None,
         "historical_iv": historical_iv,
+        "market_metrics": market_metrics,
+        "earnings": earnings,
+        "dividends": dividends,
     }

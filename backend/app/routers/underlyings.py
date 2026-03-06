@@ -27,6 +27,9 @@ def list_underlyings(
                 "last_spot": float(u.last_spot) if u.last_spot else None,
                 "last_snapshot_count": u.last_snapshot_count,
                 "last_alert_count": u.last_alert_count,
+                "iv_rank": float(u.iv_rank) if u.iv_rank is not None else None,
+                "iv_percentile": float(u.iv_percentile) if u.iv_percentile is not None else None,
+                "liquidity_rating": u.liquidity_rating,
             }
             for u in rows
         ]

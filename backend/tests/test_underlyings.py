@@ -1,14 +1,16 @@
 """Tests for the underlyings endpoints."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
-from app.models import Underlying
+import pytest
+
+from app.models import Dividend, Earning, Underlying
 from app.services.deribit import OptionQuote
 
 
-def _make_underlying(db, symbol="BTC", last_fetched_at=None):
+def _make_underlying(db, symbol="BTC", last_fetched_at=None, **kwargs):
     u = Underlying(
         symbol=symbol,
         market="crypto" if symbol in ("BTC", "ETH") else "equity",
@@ -17,6 +19,7 @@ def _make_underlying(db, symbol="BTC", last_fetched_at=None):
         last_spot=75000.0 if symbol == "BTC" else 100.0,
         last_snapshot_count=5,
         last_alert_count=1,
+        **kwargs,
     )
     db.add(u)
     db.flush()
@@ -127,3 +130,57 @@ class TestFetchUpsertsUnderlying:
         rows = db.query(Underlying).filter(Underlying.symbol == "BTC").all()
         assert len(rows) == 1  # no duplicate
         assert rows[0].last_snapshot_count == 5
+
+
+class TestUnderlyingsReturnMetrics:
+    def test_list_returns_market_metrics(self, client, db):
+        """Underlyings endpoint returns iv_rank, iv_percentile, liquidity_rating."""
+        _make_underlying(
+            db, "SPY",
+            datetime.now(timezone.utc) - timedelta(minutes=5),
+            iv_rank=32.5, iv_percentile=28.0, liquidity_rating=4,
+        )
+        resp = client.get("/api/underlyings")
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert len(data) == 1
+        assert data[0]["iv_rank"] == 32.5
+        assert data[0]["iv_percentile"] == 28.0
+        assert data[0]["liquidity_rating"] == 4
+
+    def test_list_returns_null_metrics_when_unset(self, client, db):
+        """Metrics default to null for crypto/unfetched symbols."""
+        _make_underlying(db, "BTC", datetime.now(timezone.utc))
+        resp = client.get("/api/underlyings")
+        data = resp.json()["data"][0]
+        assert data["iv_rank"] is None
+        assert data["iv_percentile"] is None
+        assert data["liquidity_rating"] is None
+
+
+class TestEarningsDividendsModels:
+    def test_earnings_stored_and_queryable(self, db):
+        u = _make_underlying(db, "AAPL", datetime.now(timezone.utc))
+        db.add(Earning(underlying_id=u.id, occurred_date=date(2026, 1, 15), eps=2.35))
+        db.add(Earning(underlying_id=u.id, occurred_date=date(2025, 10, 15), eps=-0.10))
+        db.flush()
+        earnings = db.query(Earning).filter(Earning.underlying_id == u.id).all()
+        assert len(earnings) == 2
+
+    def test_dividends_stored_and_queryable(self, db):
+        u = _make_underlying(db, "AAPL", datetime.now(timezone.utc))
+        db.add(Dividend(underlying_id=u.id, occurred_date=date(2026, 2, 10), amount=0.24))
+        db.flush()
+        dividends = db.query(Dividend).filter(Dividend.underlying_id == u.id).all()
+        assert len(dividends) == 1
+        assert float(dividends[0].amount) == 0.24
+
+    def test_earnings_unique_constraint(self, db):
+        """Duplicate date for same underlying should fail."""
+        u = _make_underlying(db, "AAPL", datetime.now(timezone.utc))
+        db.add(Earning(underlying_id=u.id, occurred_date=date(2026, 1, 15), eps=2.35))
+        db.flush()
+        db.add(Earning(underlying_id=u.id, occurred_date=date(2026, 1, 15), eps=2.40))
+        import sqlalchemy
+        with pytest.raises(sqlalchemy.exc.IntegrityError):
+            db.flush()
