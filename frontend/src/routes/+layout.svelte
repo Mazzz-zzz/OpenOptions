@@ -1,10 +1,17 @@
 <script lang="ts">
 	import SymbolSearch from '$lib/components/SymbolSearch.svelte';
-	import { selectedUnderlying, fetchStatus, fetchUnderlying } from '$lib/stores';
+	import { selectedUnderlying, fetchStatus, selectUnderlying, fetchUnderlying } from '$lib/stores';
 
 	let { children } = $props();
 	let symbol = $state('');
 
+	/** Selecting from dropdown/enter = load existing DB data */
+	function handleSelect() {
+		if (!symbol) return;
+		selectUnderlying(symbol);
+	}
+
+	/** Fetch button = hit exchange API for fresh data */
 	function handleFetch() {
 		if (!symbol) return;
 		fetchUnderlying(symbol);
@@ -21,9 +28,12 @@
 			<a href="/contracts" title="Browse all option contracts — filter and sort">Contracts</a>
 		</div>
 		<div class="nav-fetch">
-			<SymbolSearch bind:value={symbol} onsubmit={handleFetch} placeholder="Fetch symbol..." loading={$fetchStatus.loading} />
-			<button onclick={handleFetch} disabled={$fetchStatus.loading || !symbol} class="fetch-btn">
-				{$fetchStatus.loading ? 'Fetching...' : 'Fetch'}
+			<SymbolSearch bind:value={symbol} onsubmit={handleSelect} placeholder="Select symbol..." loading={$fetchStatus.loading} />
+			{#if $selectedUnderlying}
+				<span class="active-symbol" title="Currently loaded symbol">{$selectedUnderlying}</span>
+			{/if}
+			<button onclick={handleFetch} disabled={$fetchStatus.loading || !symbol} class="fetch-btn" title="Fetch fresh data from exchange API">
+				{$fetchStatus.loading ? 'Fetching...' : 'Refresh'}
 			</button>
 			{#if $fetchStatus.result}
 				<span class="fetch-result">{$fetchStatus.result}</span>
@@ -88,6 +98,15 @@
 		gap: 0.5rem;
 		align-items: center;
 		margin-left: auto;
+	}
+
+	.active-symbol {
+		background: #388bfd26;
+		color: #58a6ff;
+		padding: 0.35rem 0.6rem;
+		border-radius: 6px;
+		font-weight: 600;
+		font-size: 0.8rem;
 	}
 
 	.fetch-btn {

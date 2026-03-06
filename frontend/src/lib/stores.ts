@@ -9,6 +9,14 @@ export const fetchStatus = writable<{ loading: boolean; result: string | null; e
 	error: null,
 });
 
+/** Select a symbol and load existing data from the DB (no exchange API call). */
+export function selectUnderlying(symbol: string) {
+	if (!symbol) return;
+	selectedUnderlying.set(symbol);
+	fetchStatus.set({ loading: false, result: null, error: null });
+}
+
+/** Fetch fresh data from the exchange API, then reload. */
 export async function fetchUnderlying(symbol: string) {
 	if (!symbol) return;
 	selectedUnderlying.set(symbol);
@@ -20,7 +28,7 @@ export async function fetchUnderlying(symbol: string) {
 			result: `${res.alerts_raised} alerts / ${res.snapshots} contracts`,
 			error: null,
 		});
-		// Refresh dependent stores
+		// Refresh alerts after fresh fetch
 		await alerts.refresh();
 	} catch (e) {
 		fetchStatus.set({

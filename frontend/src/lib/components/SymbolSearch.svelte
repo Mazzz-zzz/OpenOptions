@@ -1,4 +1,7 @@
 <script lang="ts">
+	import { api, type FetchedUnderlying } from '$lib/api';
+	import { onMount } from 'svelte';
+
 	let {
 		value = $bindable(''),
 		onsubmit,
@@ -13,6 +16,14 @@
 
 	let inputEl: HTMLInputElement;
 	let focused = $state(false);
+	let fetched = $state<FetchedUnderlying[]>([]);
+
+	onMount(async () => {
+		try {
+			const res = await api.getUnderlyings();
+			fetched = res.data;
+		} catch {}
+	});
 
 	const POPULAR = [
 		{ label: 'BTC', group: 'Crypto' },
@@ -28,6 +39,8 @@
 		{ label: 'META', group: 'Equity' },
 		{ label: 'GOOGL', group: 'Equity' },
 	];
+
+	let fetchedSymbols = $derived(new Set(fetched.map(f => f.symbol)));
 
 	let filtered = $derived(
 		value.trim()
@@ -56,6 +69,17 @@
 			inputEl?.blur();
 		}
 	}
+
+	function timeAgo(iso: string): string {
+		const diff = Date.now() - new Date(iso).getTime();
+		const mins = Math.floor(diff / 60000);
+		if (mins < 1) return 'just now';
+		if (mins < 60) return `${mins}m ago`;
+		const hrs = Math.floor(mins / 60);
+		if (hrs < 24) return `${hrs}h ago`;
+		const days = Math.floor(hrs / 24);
+		return `${days}d ago`;
+	}
 </script>
 
 <div class="search-wrapper">
@@ -83,10 +107,29 @@
 		{/if}
 	</div>
 
-	{#if focused && filtered.length > 0}
+	{#if focused}
 		<div class="dropdown">
+			{#if fetched.length > 0}
+				<div class="group-label">Previously fetched</div>
+				{#each fetched as u}
+					{@const matches = !value.trim() || u.symbol.toLowerCase().includes(value.toLowerCase())}
+					{#if matches}
+						<button
+							class="dropdown-item fetched-item"
+							class:active={value.toUpperCase() === u.symbol}
+							onmousedown={(e) => { e.preventDefault(); select(u.symbol); }}
+						>
+							<span class="sym">{u.symbol}</span>
+							{#if u.last_fetched_at}
+								<span class="meta">{timeAgo(u.last_fetched_at)}</span>
+							{/if}
+						</button>
+					{/if}
+				{/each}
+			{/if}
+
 			{#each ['Crypto', 'Index ETF', 'Equity'] as group}
-				{@const items = filtered.filter(s => s.group === group)}
+				{@const items = filtered.filter(s => s.group === group && !fetchedSymbols.has(s.label))}
 				{#if items.length > 0}
 					<div class="group-label">{group}</div>
 					{#each items as item}
@@ -100,13 +143,13 @@
 					{/each}
 				{/if}
 			{/each}
-			{#if value.trim() && !POPULAR.some(s => s.label === value.trim().toUpperCase())}
+			{#if value.trim() && !POPULAR.some(s => s.label === value.trim().toUpperCase()) && !fetchedSymbols.has(value.trim().toUpperCase())}
 				<div class="group-label">Custom</div>
 				<button
 					class="dropdown-item custom"
 					onmousedown={(e) => { e.preventDefault(); select(value.trim().toUpperCase()); }}
 				>
-					Fetch <strong>{value.trim().toUpperCase()}</strong>
+					Load <strong>{value.trim().toUpperCase()}</strong>
 				</button>
 			{/if}
 		</div>
@@ -172,14 +215,14 @@
 		position: absolute;
 		top: calc(100% + 4px);
 		left: 0;
-		width: 200px;
+		width: 220px;
 		background: #1c2128;
 		border: 1px solid #30363d;
 		border-radius: 8px;
 		padding: 0.25rem 0;
 		z-index: 100;
 		box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-		max-height: 320px;
+		max-height: 360px;
 		overflow-y: auto;
 	}
 
@@ -220,5 +263,20 @@
 
 	.dropdown-item.custom strong {
 		color: #58a6ff;
+	}
+
+	.fetched-item {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+	}
+
+	.fetched-item .sym {
+		font-weight: 600;
+	}
+
+	.fetched-item .meta {
+		font-size: 0.65rem;
+		color: #484f58;
 	}
 </style>
