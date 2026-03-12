@@ -342,29 +342,20 @@ class TestTastytradeParsing:
             }
         })
 
-        # Nested chain response
+        # Nested chain response (real API structure: option-chains[].expirations[].strikes[])
         chain_resp = self._mock_response({
             "data": {
-                "futures": [{
-                    "symbol": "/ESM6",
-                    "option-expirations": [{
+                "futures": [{"symbol": "/ESM6"}],
+                "option-chains": [{
+                    "underlying-symbol": "/ES",
+                    "root-symbol": "/ES",
+                    "expirations": [{
+                        "underlying-symbol": "/ESM6",
                         "expiration-date": future_expiry,
                         "strikes": [{
                             "strike-price": "5500.0",
-                            "call": {
-                                "symbol": "./ESM6C5500",
-                                "strike-price": "5500.0",
-                                "expiration-date": future_expiry,
-                                "option-type": "C",
-                                "active": True,
-                            },
-                            "put": {
-                                "symbol": "./ESM6P5500",
-                                "strike-price": "5500.0",
-                                "expiration-date": future_expiry,
-                                "option-type": "P",
-                                "active": True,
-                            },
+                            "call": "./ESM6C5500",
+                            "put": "./ESM6P5500",
                         }],
                     }],
                 }]
@@ -420,7 +411,7 @@ class TestTastytradeParsing:
         futures_md_resp = self._mock_response({
             "data": {"items": [{"symbol": "/ESM6", "last": "5500.0"}]}
         })
-        chain_resp = self._mock_response({"data": {"futures": []}})
+        chain_resp = self._mock_response({"data": {"futures": [], "option-chains": []}})
 
         async def mock_get(url, **kwargs):
             params = kwargs.get("params", {})

@@ -253,7 +253,10 @@ class TastytradeClient:
         # Get futures option chain
         all_options = await self._get_futures_option_chain(product_code)
 
-        # Filter expired
+        # Filter expired and limit to nearest expirations to stay within
+        # API Gateway HTTP API's 30s timeout (ES has 57 exps × 100s of strikes)
+        MAX_FUTURES_EXPIRIES = 6
+
         options = []
         for opt in all_options:
             exp_str = opt.get("expiration-date", "")
@@ -266,6 +269,16 @@ class TastytradeClient:
 
         if not options:
             return []
+
+        # Keep only the nearest N expirations
+        unique_expiries = sorted({opt["expiration-date"] for opt in options})
+        if len(unique_expiries) > MAX_FUTURES_EXPIRIES:
+            allowed = set(unique_expiries[:MAX_FUTURES_EXPIRIES])
+            options = [opt for opt in options if opt["expiration-date"] in allowed]
+            logger.info(
+                f"/{product_code}: trimmed to {MAX_FUTURES_EXPIRIES} nearest expiries "
+                f"({len(options)} contracts, {len(unique_expiries)} total available)"
+            )
 
         symbols = [opt["symbol"] for opt in options]
         market_data = await self._get_futures_market_data_batched(symbols)
@@ -337,21 +350,38 @@ class TastytradeClient:
         return float(item.get("last") or item.get("mark") or item.get("prev-close") or 0)
 
     async def _get_futures_option_chain(self, product_code: str) -> list[dict]:
-        """Get all active futures options for the product code."""
+        """Get all active futures options for the product code.
+
+        Nested response structure:
+          data.option-chains[].expirations[].strikes[]
+        Each strike has call/put as symbol strings, with expiration-date
+        and strike-price coming from parent groups.
+        """
         resp = await self._http.get(
             f"/futures-option-chains/{product_code.upper()}/nested",
         )
         resp.raise_for_status()
         data = resp.json()
 
-        # Nested response: futures -> expirations -> strikes -> options
         options = []
-        for future in data.get("data", {}).get("futures", []):
-            for exp_group in future.get("option-expirations", []):
+        for chain in data.get("data", {}).get("option-chains", []):
+            for exp_group in chain.get("expirations", []):
+                exp_date = exp_group.get("expiration-date", "")
+                if not exp_date:
+                    continue
                 for strike_group in exp_group.get("strikes", []):
-                    for opt in [strike_group.get("call"), strike_group.get("put")]:
-                        if opt and opt.get("active", True):
-                            options.append(opt)
+                    strike_price = strike_group.get("strike-price")
+                    if not strike_price:
+                        continue
+                    for opt_type, key in [("C", "call"), ("P", "put")]:
+                        symbol = strike_group.get(key)
+                        if symbol:
+                            options.append({
+                                "symbol": symbol,
+                                "expiration-date": exp_date,
+                                "strike-price": strike_price,
+                                "option-type": opt_type,
+                            })
         return options
 
     async def _get_futures_market_data_batched(self, symbols: list[str]) -> dict[str, dict]:
