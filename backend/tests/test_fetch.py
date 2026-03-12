@@ -6,8 +6,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.models import Alert, Contract, Snapshot
+from app.config import Settings, get_settings
+from app.main import app
+from app.models import Alert, Contract, Snapshot, Underlying
 from app.services.deribit import OptionQuote
+from app.services.tastytrade import OptionQuote as TastyOptionQuote
 
 
 def _make_chain(underlying_price=75000.0):
@@ -168,3 +171,84 @@ class TestFetchEndpoint:
                 assert abs(net_edge) > 1.0, (
                     f"net_edge={net_edge} too small — likely still in vol terms"
                 )
+
+
+def _make_futures_chain():
+    """Create a minimal futures option chain for testing."""
+    return [
+        TastyOptionQuote(
+            symbol="./ESM6C5500",
+            underlying="/ES",
+            strike=5500.0,
+            expiry=date(2026, 6, 19),
+            option_type="C",
+            bid=50.0,
+            ask=51.0,
+            mid=50.5,
+            market_iv=0.18,
+            underlying_price=5500.0,
+        ),
+        TastyOptionQuote(
+            symbol="./ESM6P5500",
+            underlying="/ES",
+            strike=5500.0,
+            expiry=date(2026, 6, 19),
+            option_type="P",
+            bid=48.0,
+            ask=49.0,
+            mid=48.5,
+            market_iv=0.19,
+            underlying_price=5500.0,
+        ),
+    ]
+
+
+class TestFetchFutures:
+    @pytest.fixture(autouse=True)
+    def _override_settings(self):
+        """Override settings to include a fake tastytrade refresh token."""
+        mock_settings = MagicMock(spec=Settings)
+        mock_settings.deribit_client_id = ""
+        mock_settings.deribit_client_secret = ""
+        mock_settings.tastytrade_client_id = "test-id"
+        mock_settings.tastytrade_client_secret = "test-secret"
+        mock_settings.tastytrade_refresh_token = "test-refresh"
+        mock_settings.fred_api_key = ""
+        mock_settings.vol_threshold = 2.0
+        app.dependency_overrides[get_settings] = lambda: mock_settings
+        yield
+        app.dependency_overrides.pop(get_settings, None)
+
+    def test_fetch_futures_creates_snapshots(self, client, db):
+        """Futures symbol /ES should route to futures chain."""
+        chain = _make_futures_chain()
+
+        with patch("app.routers.fetch.TastytradeClient") as MockClient, \
+             patch("app.routers.fetch.get_risk_free_rate", new_callable=AsyncMock, return_value=0.05):
+            instance = MockClient.return_value
+            instance.fetch_futures_chain = AsyncMock(return_value=chain)
+            instance.close = AsyncMock()
+
+            resp = client.post("/api/fetch/%2FES")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["underlying"] == "/ES"
+        assert data["source"] == "tastytrade"
+        assert data["snapshots"] == 2
+
+        # Verify underlying record created with market=futures
+        u = db.query(Underlying).filter(Underlying.symbol == "/ES").first()
+        assert u is not None
+        assert u.market == "futures"
+
+    def test_fetch_futures_empty_chain(self, client, db):
+        """Empty futures chain returns 404."""
+        with patch("app.routers.fetch.TastytradeClient") as MockClient:
+            instance = MockClient.return_value
+            instance.fetch_futures_chain = AsyncMock(return_value=[])
+            instance.close = AsyncMock()
+
+            resp = client.post("/api/fetch/%2FES")
+
+        assert resp.status_code == 404

@@ -30,10 +30,17 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 CRYPTO_UNDERLYINGS = {"BTC", "ETH"}
+# Futures product codes that Tastytrade supports
+FUTURES_PRODUCTS = {"ES", "NQ", "CL", "GC", "SI", "ZB", "ZN", "ZC", "ZS", "NG", "RTY", "YM", "HE", "LE"}
 COOLDOWN_MINUTES = 5
 
 
-@router.post("/fetch/{underlying}")
+def _is_futures(symbol: str) -> bool:
+    """Check if symbol is a futures product (e.g. /ES, /NQ)."""
+    return symbol.startswith("/") and symbol[1:] in FUTURES_PRODUCTS
+
+
+@router.post("/fetch/{underlying:path}")
 async def fetch_chain(
     underlying: str,
     force: bool = False,
@@ -44,9 +51,15 @@ async def fetch_chain(
 
     Fetches full options chain, fits SVI surface per expiry,
     computes greeks + mispricing, writes snapshots + alerts.
+    Supports equities (SPY), crypto (BTC), and futures (/ES).
     """
     underlying = underlying.upper()
-    if not underlying.isalpha() or len(underlying) > 10:
+    is_futures = _is_futures(underlying)
+
+    if is_futures:
+        # Futures: /ES -> product code ES
+        product_code = underlying[1:]
+    elif not underlying.isalpha() or len(underlying) > 10:
         raise HTTPException(status_code=400, detail=f"Invalid symbol '{underlying}'")
 
     # Cooldown check
@@ -65,8 +78,15 @@ async def fetch_chain(
                 )
 
     is_crypto = underlying in CRYPTO_UNDERLYINGS
-    source = "deribit" if is_crypto else "tastytrade"
-    market = "crypto" if is_crypto else "equity"
+    if is_futures:
+        source = "tastytrade"
+        market = "futures"
+    elif is_crypto:
+        source = "deribit"
+        market = "crypto"
+    else:
+        source = "tastytrade"
+        market = "equity"
 
     # 1. Fetch chain from market data source
     if is_crypto:
@@ -85,10 +105,13 @@ async def fetch_chain(
     dividends_data = []
 
     try:
-        chain = await client.fetch_chain(underlying)
+        if is_futures:
+            chain = await client.fetch_futures_chain(product_code)
+        else:
+            chain = await client.fetch_chain(underlying)
 
         # Fetch market metrics, earnings, dividends (equity only, non-fatal)
-        if not is_crypto and isinstance(client, TastytradeClient):
+        if not is_crypto and not is_futures and isinstance(client, TastytradeClient):
             try:
                 market_metrics = await client.fetch_market_metrics(underlying)
             except Exception as e:

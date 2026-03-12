@@ -319,6 +319,126 @@ class TestTastytradeParsing:
         assert result == []
 
     @pytest.mark.asyncio
+    async def test_fetch_futures_chain(self):
+        """Futures option chain should parse nested response structure."""
+        future_expiry = (date.today() + timedelta(days=14)).isoformat()
+        token_resp = self._mock_response({"access_token": "tok", "expires_in": 3600})
+
+        # Futures instruments response
+        instruments_resp = self._mock_response({
+            "data": {
+                "items": [
+                    {"symbol": "/ESM6", "product-code": "ES", "is-closing-only": False},
+                ]
+            }
+        })
+
+        # Futures price response
+        futures_md_resp = self._mock_response({
+            "data": {
+                "items": [
+                    {"symbol": "/ESM6", "last": "5500.0", "mark": "5500.25"}
+                ]
+            }
+        })
+
+        # Nested chain response
+        chain_resp = self._mock_response({
+            "data": {
+                "futures": [{
+                    "symbol": "/ESM6",
+                    "option-expirations": [{
+                        "expiration-date": future_expiry,
+                        "strikes": [{
+                            "strike-price": "5500.0",
+                            "call": {
+                                "symbol": "./ESM6C5500",
+                                "strike-price": "5500.0",
+                                "expiration-date": future_expiry,
+                                "option-type": "C",
+                                "active": True,
+                            },
+                            "put": {
+                                "symbol": "./ESM6P5500",
+                                "strike-price": "5500.0",
+                                "expiration-date": future_expiry,
+                                "option-type": "P",
+                                "active": True,
+                            },
+                        }],
+                    }],
+                }]
+            }
+        })
+
+        # Market data for futures options
+        option_md_resp = self._mock_response({
+            "data": {
+                "items": [
+                    {"symbol": "./ESM6C5500", "bid": "50.0", "ask": "51.0", "volatility": "0.18"},
+                    {"symbol": "./ESM6P5500", "bid": "48.0", "ask": "49.0", "volatility": "0.19"},
+                ]
+            }
+        })
+
+        call_count = 0
+
+        async def mock_get(url, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            params = kwargs.get("params", {})
+            if "instruments/futures" in url:
+                return instruments_resp
+            if "futures-option-chains" in url:
+                return chain_resp
+            if "market-data" in url:
+                if "future-option" in params:
+                    return option_md_resp
+                if "future" in params:
+                    return futures_md_resp
+            return option_md_resp
+
+        with patch.object(self.client._http, "post", AsyncMock(return_value=token_resp)):
+            with patch.object(self.client._http, "get", AsyncMock(side_effect=mock_get)):
+                quotes = await self.client.fetch_futures_chain("ES")
+
+        assert len(quotes) == 2
+        assert quotes[0].underlying == "/ES"
+        assert quotes[0].underlying_price == 5500.0
+        assert quotes[0].strike == 5500.0
+        types = {q.option_type for q in quotes}
+        assert "C" in types
+        assert "P" in types
+
+    @pytest.mark.asyncio
+    async def test_fetch_futures_chain_empty(self):
+        """Empty futures chain should return empty list."""
+        token_resp = self._mock_response({"access_token": "tok", "expires_in": 3600})
+        instruments_resp = self._mock_response({
+            "data": {"items": [{"symbol": "/ESM6", "is-closing-only": False}]}
+        })
+        futures_md_resp = self._mock_response({
+            "data": {"items": [{"symbol": "/ESM6", "last": "5500.0"}]}
+        })
+        chain_resp = self._mock_response({"data": {"futures": []}})
+
+        async def mock_get(url, **kwargs):
+            params = kwargs.get("params", {})
+            if "instruments/futures" in url:
+                return instruments_resp
+            if "futures-option-chains" in url:
+                return chain_resp
+            if "market-data" in url and "future" in params:
+                return futures_md_resp
+            return self._mock_response({"data": {"items": []}})
+
+        with patch.object(self.client._http, "post", AsyncMock(return_value=token_resp)):
+            with patch.object(self.client._http, "get", AsyncMock(side_effect=mock_get)):
+                quotes = await self.client.fetch_futures_chain("ES")
+
+        assert quotes == []
+
+    @pytest.mark.asyncio
     async def test_fetch_chain_no_expiry_filter(self):
         """After removing MAX_DTE, far-dated contracts should be included."""
         far_expiry = (date.today() + timedelta(days=365)).isoformat()

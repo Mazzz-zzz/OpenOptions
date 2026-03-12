@@ -1,7 +1,9 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { api, type IvAnalysisData, type SmilePoint } from '$lib/api';
-	import { selectedUnderlying } from '$lib/stores';
+	import { selectedUnderlying, addToast } from '$lib/stores';
+	import { formatIv, formatPts } from '$lib/utils';
+	import { colors, plotlyLayout, plotlyAxis, plotlyLegend } from '$lib/theme';
 
 	let lookbackDays = $state(30);
 	let loading = $state(false);
@@ -18,6 +20,14 @@
 		Plotly = mod.default || mod;
 	});
 
+	onDestroy(() => {
+		if (Plotly) {
+			if (termChart) Plotly.purge(termChart);
+			if (skewChart) Plotly.purge(skewChart);
+			if (smileChart) Plotly.purge(smileChart);
+		}
+	});
+
 	async function load(underlying: string) {
 		if (!underlying) return;
 		loading = true;
@@ -25,13 +35,14 @@
 		try {
 			data = await api.getIvAnalysis(underlying, lookbackDays);
 			if (data && data.skew_by_expiry.length > 0 && !selectedSmileExpiry) {
-				// Default to 2nd expiry if available (nearest is often too tight)
 				selectedSmileExpiry = data.skew_by_expiry.length > 1
 					? data.skew_by_expiry[1].expiry
 					: data.skew_by_expiry[0].expiry;
 			}
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to load IV analysis';
+			const msg = e instanceof Error ? e.message : 'Failed to load IV analysis';
+			error = msg;
+			addToast(msg, 'error');
 		} finally {
 			loading = false;
 		}
@@ -42,7 +53,6 @@
 		if (sym) load(sym);
 	});
 
-	// Render charts when data or Plotly changes
 	$effect(() => {
 		if (!Plotly || !data) return;
 		requestAnimationFrame(() => {
@@ -51,7 +61,6 @@
 		});
 	});
 
-	// Re-render smile when expiry selection changes
 	$effect(() => {
 		if (!Plotly || !data || !smileChart) return;
 		const _ = selectedSmileExpiry;
@@ -64,35 +73,32 @@
 		const ts = data.term_structure;
 		const sk = data.skew_by_expiry;
 
-		// Term structure + skew overlay
 		const traces: any[] = [
 			{
 				type: 'scatter', mode: 'lines+markers',
 				x: ts.map(p => p.dte), y: ts.map(p => p.atm_iv),
 				name: 'ATM IV', yaxis: 'y',
-				line: { color: '#58a6ff', width: 2.5 },
-				marker: { size: 7, color: '#58a6ff' },
+				line: { color: colors.blue, width: 2.5 },
+				marker: { size: 7, color: colors.blue },
 				hovertemplate: ts.map(p =>
 					`${p.expiry} (${p.dte}d)<br>ATM IV: ${(p.atm_iv * 100).toFixed(1)}%<br>Strike: $${p.atm_strike.toLocaleString()}<extra></extra>`
 				),
 			},
 		];
 
-		// Model IV
 		const modelPts = ts.filter(p => p.atm_model_iv !== null);
 		if (modelPts.length > 0) {
 			traces.push({
 				type: 'scatter', mode: 'lines',
 				x: modelPts.map(p => p.dte), y: modelPts.map(p => p.atm_model_iv),
 				name: 'Model IV', yaxis: 'y',
-				line: { color: '#3fb950', width: 1.5, dash: 'dot' },
+				line: { color: colors.green, width: 1.5, dash: 'dot' },
 				hovertemplate: modelPts.map(p =>
 					`${p.expiry} (${p.dte}d)<br>Model: ${(p.atm_model_iv! * 100).toFixed(1)}%<extra></extra>`
 				),
 			});
 		}
 
-		// 25d put/call IV wings
 		const skPut = sk.filter(s => s.put_25d_iv !== null);
 		const skCall = sk.filter(s => s.call_25d_iv !== null);
 		if (skPut.length > 0) {
@@ -100,7 +106,7 @@
 				type: 'scatter', mode: 'lines',
 				x: skPut.map(s => s.dte), y: skPut.map(s => s.put_25d_iv),
 				name: '25\u0394 Put IV', yaxis: 'y',
-				line: { color: '#f85149', width: 1.5, dash: 'dash' },
+				line: { color: colors.red, width: 1.5, dash: 'dash' },
 				hovertemplate: skPut.map(s =>
 					`${s.expiry} (${s.dte}d)<br>25\u0394P IV: ${(s.put_25d_iv! * 100).toFixed(1)}%<extra></extra>`
 				),
@@ -111,14 +117,13 @@
 				type: 'scatter', mode: 'lines',
 				x: skCall.map(s => s.dte), y: skCall.map(s => s.call_25d_iv),
 				name: '25\u0394 Call IV', yaxis: 'y',
-				line: { color: '#f0883e', width: 1.5, dash: 'dash' },
+				line: { color: colors.orange, width: 1.5, dash: 'dash' },
 				hovertemplate: skCall.map(s =>
 					`${s.expiry} (${s.dte}d)<br>25\u0394C IV: ${(s.call_25d_iv! * 100).toFixed(1)}%<extra></extra>`
 				),
 			});
 		}
 
-		// Crush zone marker
 		if (ts.length >= 2) {
 			let maxDrop = 0, kinkIdx = -1;
 			for (let i = 0; i < ts.length - 1; i++) {
@@ -130,25 +135,20 @@
 					type: 'scatter', mode: 'markers',
 					x: [ts[kinkIdx].dte], y: [ts[kinkIdx].atm_iv],
 					name: `Crush (-${(maxDrop * 100).toFixed(1)}pts)`,
-					marker: { size: 14, color: '#f85149', symbol: 'diamond', line: { width: 2, color: '#f85149' } },
+					marker: { size: 14, color: colors.red, symbol: 'diamond', line: { width: 2, color: colors.red } },
 					hovertemplate: `CRUSH<br>${ts[kinkIdx].expiry}<br>IV drop: -${(maxDrop * 100).toFixed(1)}pts<extra></extra>`,
 					yaxis: 'y',
 				});
 			}
 		}
 
-		Plotly.newPlot(termChart, traces, {
-			title: { text: 'Term Structure & Skew', font: { color: '#e1e4e8', size: 14 } },
-			paper_bgcolor: '#0f1117', plot_bgcolor: '#0f1117',
-			xaxis: { title: 'Days to Expiry', color: '#8b949e', gridcolor: '#21262d' },
-			yaxis: { title: 'Implied Volatility', color: '#8b949e', gridcolor: '#21262d', tickformat: '.0%' },
-			font: { color: '#8b949e' },
-			margin: { t: 50, b: 50, l: 60, r: 20 },
-			legend: { bgcolor: 'rgba(22,27,34,0.8)', font: { color: '#c9d1d9', size: 10 }, orientation: 'h', y: -0.15 },
-			hovermode: 'closest',
-		}, { responsive: true });
+		Plotly.newPlot(termChart, traces, plotlyLayout({
+			title: { text: 'Term Structure & Skew', font: { color: colors.text, size: 14 } },
+			xaxis: plotlyAxis('Days to Expiry'),
+			yaxis: plotlyAxis('Implied Volatility', { tickformat: '.0%' }),
+			legend: { ...plotlyLegend, orientation: 'h', y: -0.15 },
+		}), { responsive: true });
 
-		// Skew chart (risk reversal + butterfly)
 		if (skewChart) renderSkewBars();
 	}
 
@@ -163,7 +163,7 @@
 				x: sk.map(s => `${s.dte}d`),
 				y: sk.map(s => s.risk_reversal! * 100),
 				name: 'Risk Reversal',
-				marker: { color: sk.map(s => s.risk_reversal! > 0 ? '#f85149' : '#3fb950') },
+				marker: { color: sk.map(s => s.risk_reversal! > 0 ? colors.red : colors.green) },
 				hovertemplate: sk.map(s =>
 					`${s.expiry} (${s.dte}d)<br>RR: ${(s.risk_reversal! * 100).toFixed(1)}pts<br>${s.risk_reversal! > 0 ? 'Put skew (downside fear)' : 'Call skew (upside demand)'}<extra></extra>`
 				),
@@ -178,25 +178,23 @@
 				y: bfly.map(s => s.butterfly! * 100),
 				name: 'Butterfly',
 				yaxis: 'y2',
-				line: { color: '#bc8cff', width: 2 },
-				marker: { size: 5, color: '#bc8cff' },
+				line: { color: colors.purple, width: 2 },
+				marker: { size: 5, color: colors.purple },
 				hovertemplate: bfly.map(s =>
 					`${s.expiry} (${s.dte}d)<br>Bfly: ${(s.butterfly! * 100).toFixed(1)}pts<br>${s.butterfly! > 0 ? 'Fat tails (smile)' : 'Thin tails'}<extra></extra>`
 				),
 			});
 		}
 
-		Plotly.newPlot(skewChart, traces, {
-			title: { text: 'Skew by Expiry', font: { color: '#e1e4e8', size: 14 } },
-			paper_bgcolor: '#0f1117', plot_bgcolor: '#0f1117',
-			xaxis: { color: '#8b949e', gridcolor: '#21262d' },
-			yaxis: { title: 'Risk Reversal (pts)', color: '#8b949e', gridcolor: '#21262d', zeroline: true, zerolinecolor: '#30363d' },
-			yaxis2: { title: 'Butterfly (pts)', color: '#bc8cff', overlaying: 'y', side: 'right', gridcolor: 'transparent' },
-			font: { color: '#8b949e' },
+		Plotly.newPlot(skewChart, traces, plotlyLayout({
+			title: { text: 'Skew by Expiry', font: { color: colors.text, size: 14 } },
+			xaxis: plotlyAxis(undefined),
+			yaxis: plotlyAxis('Risk Reversal (pts)', { zeroline: true, zerolinecolor: colors.border }),
+			yaxis2: { title: 'Butterfly (pts)', color: colors.purple, overlaying: 'y', side: 'right', gridcolor: 'transparent' },
+			legend: { ...plotlyLegend, orientation: 'h', y: -0.15 },
 			margin: { t: 50, b: 50, l: 60, r: 60 },
-			legend: { bgcolor: 'rgba(22,27,34,0.8)', font: { color: '#c9d1d9', size: 10 }, orientation: 'h', y: -0.15 },
 			barmode: 'group',
-		}, { responsive: true });
+		}), { responsive: true });
 	}
 
 	function renderSmile() {
@@ -204,7 +202,6 @@
 		const pts = data.smile.filter(p => p.expiry === selectedSmileExpiry);
 		if (pts.length === 0) return;
 
-		// Sort by strike for clean lines
 		const puts = pts.filter(p => p.option_type === 'P').sort((a, b) => a.strike - b.strike);
 		const calls = pts.filter(p => p.option_type === 'C').sort((a, b) => a.strike - b.strike);
 
@@ -214,8 +211,8 @@
 			traces.push({
 				type: 'scatter', mode: 'lines+markers',
 				x: puts.map(p => p.moneyness), y: puts.map(p => p.market_iv),
-				name: 'Put IV', line: { color: '#f85149', width: 2 },
-				marker: { size: 5, color: puts.map(p => p.net_edge !== null && p.net_edge > 0 ? '#3fb950' : '#f85149') },
+				name: 'Put IV', line: { color: colors.red, width: 2 },
+				marker: { size: 5, color: puts.map(p => p.net_edge !== null && p.net_edge > 0 ? colors.green : colors.red) },
 				hovertemplate: puts.map(p =>
 					`$${p.strike.toLocaleString()} (${(p.moneyness * 100).toFixed(0)}%)<br>IV: ${(p.market_iv * 100).toFixed(1)}%${p.model_iv ? `<br>Model: ${(p.model_iv * 100).toFixed(1)}%` : ''}${p.deviation ? `<br>Dev: ${(p.deviation * 100).toFixed(1)}pts` : ''}${p.net_edge !== null ? `<br>Edge: $${p.net_edge.toFixed(2)}` : ''}<extra>Put</extra>`
 				),
@@ -225,19 +222,17 @@
 			traces.push({
 				type: 'scatter', mode: 'lines+markers',
 				x: calls.map(p => p.moneyness), y: calls.map(p => p.market_iv),
-				name: 'Call IV', line: { color: '#58a6ff', width: 2 },
-				marker: { size: 5, color: calls.map(p => p.net_edge !== null && p.net_edge > 0 ? '#3fb950' : '#58a6ff') },
+				name: 'Call IV', line: { color: colors.blue, width: 2 },
+				marker: { size: 5, color: calls.map(p => p.net_edge !== null && p.net_edge > 0 ? colors.green : colors.blue) },
 				hovertemplate: calls.map(p =>
 					`$${p.strike.toLocaleString()} (${(p.moneyness * 100).toFixed(0)}%)<br>IV: ${(p.market_iv * 100).toFixed(1)}%${p.model_iv ? `<br>Model: ${(p.model_iv * 100).toFixed(1)}%` : ''}${p.deviation ? `<br>Dev: ${(p.deviation * 100).toFixed(1)}pts` : ''}${p.net_edge !== null ? `<br>Edge: $${p.net_edge.toFixed(2)}` : ''}<extra>Call</extra>`
 				),
 			});
 		}
 
-		// Model IV line (combined)
 		const allSorted = [...pts].sort((a, b) => a.strike - b.strike);
 		const withModel = allSorted.filter(p => p.model_iv !== null);
 		if (withModel.length > 0) {
-			// Deduplicate by strike (use avg model_iv)
 			const byStrike = new Map<number, number[]>();
 			for (const p of withModel) {
 				if (!byStrike.has(p.moneyness)) byStrike.set(p.moneyness, []);
@@ -251,62 +246,47 @@
 			traces.push({
 				type: 'scatter', mode: 'lines',
 				x: modelX, y: modelY,
-				name: 'SVI Model', line: { color: '#3fb950', width: 2, dash: 'dot' },
+				name: 'SVI Model', line: { color: colors.green, width: 2, dash: 'dot' },
 				hoverinfo: 'skip',
 			});
 		}
 
-		// ATM line
 		traces.push({
 			type: 'scatter', mode: 'lines',
 			x: [1, 1], y: [0, 5],
-			name: 'ATM', line: { color: '#484f58', width: 1, dash: 'dash' },
+			name: 'ATM', line: { color: colors.textMuted, width: 1, dash: 'dash' },
 			hoverinfo: 'skip', showlegend: false,
 		});
 
 		const expiryInfo = data.skew_by_expiry.find(s => s.expiry === selectedSmileExpiry);
 
-		Plotly.newPlot(smileChart, traces, {
-			title: { text: `Volatility Smile — ${selectedSmileExpiry} (${expiryInfo?.dte ?? '?'}d)`, font: { color: '#e1e4e8', size: 14 } },
-			paper_bgcolor: '#0f1117', plot_bgcolor: '#0f1117',
-			xaxis: { title: 'Moneyness (Strike / Spot)', color: '#8b949e', gridcolor: '#21262d', tickformat: '.0%' },
-			yaxis: { title: 'Implied Volatility', color: '#8b949e', gridcolor: '#21262d', tickformat: '.0%', rangemode: 'tozero' },
-			font: { color: '#8b949e' },
-			margin: { t: 50, b: 50, l: 60, r: 20 },
-			legend: { bgcolor: 'rgba(22,27,34,0.8)', font: { color: '#c9d1d9', size: 10 }, orientation: 'h', y: -0.15 },
-			hovermode: 'closest',
-		}, { responsive: true });
+		Plotly.newPlot(smileChart, traces, plotlyLayout({
+			title: { text: `Volatility Smile \u2014 ${selectedSmileExpiry} (${expiryInfo?.dte ?? '?'}d)`, font: { color: colors.text, size: 14 } },
+			xaxis: plotlyAxis('Moneyness (Strike / Spot)', { tickformat: '.0%' }),
+			yaxis: plotlyAxis('Implied Volatility', { tickformat: '.0%', rangemode: 'tozero' }),
+			legend: { ...plotlyLegend, orientation: 'h', y: -0.15 },
+		}), { responsive: true });
 	}
 
 	function rankColor(rank: number | null): string {
-		if (rank === null) return '#8b949e';
-		if (rank >= 80) return '#f85149';
-		if (rank >= 50) return '#f0883e';
-		return '#3fb950';
+		if (rank === null) return colors.textMuted;
+		if (rank >= 80) return colors.red;
+		if (rank >= 50) return colors.orange;
+		return colors.green;
 	}
 
 	function slopeLabel(slope: number | null): string {
-		if (slope === null) return '—';
+		if (slope === null) return '\u2014';
 		if (slope > 0.005) return 'Contango';
 		if (slope < -0.005) return 'Backwardation';
 		return 'Flat';
 	}
 
 	function slopeColor(slope: number | null): string {
-		if (slope === null) return '#8b949e';
-		if (slope > 0.005) return '#3fb950';
-		if (slope < -0.005) return '#f85149';
-		return '#8b949e';
-	}
-
-	function fmtIv(v: number | null): string {
-		return v !== null ? (v * 100).toFixed(1) + '%' : '—';
-	}
-
-	function fmtPts(v: number | null): string {
-		if (v === null) return '—';
-		const pts = v * 100;
-		return (pts >= 0 ? '+' : '') + pts.toFixed(1);
+		if (slope === null) return colors.textMuted;
+		if (slope > 0.005) return colors.green;
+		if (slope < -0.005) return colors.red;
+		return colors.textMuted;
 	}
 
 	let ivRankDisplay = $derived(data?.market_metrics?.iv_rank ?? data?.iv_rank?.rank ?? null);
@@ -340,49 +320,48 @@
 	{/if}
 
 	{#if data && data.term_structure.length > 0}
-		<!-- Top metric cards -->
 		<div class="cards">
 			<div class="card" title="Near-term ATM implied volatility">
 				<div class="card-label">ATM IV</div>
-				<div class="card-value">{fmtIv(data.term_structure[0].atm_iv)}</div>
+				<div class="card-value">{formatIv(data.term_structure[0].atm_iv)}</div>
 				{#if data.term_structure[0].atm_model_iv}
 					<div class="card-sub" title="SVI model fair value">
-						Model: {fmtIv(data.term_structure[0].atm_model_iv)}
+						Model: {formatIv(data.term_structure[0].atm_model_iv)}
 						{#if data.straddles[0]?.vol_premium !== null && data.straddles[0]?.vol_premium !== undefined}
 							<span class="vol-premium" class:rich={data.straddles[0].vol_premium! > 0} class:cheap={data.straddles[0].vol_premium! < 0}>
-								({fmtPts(data.straddles[0].vol_premium)} vol premium)
+								({formatPts(data.straddles[0].vol_premium)} vol premium)
 							</span>
 						{/if}
 					</div>
 				{/if}
 			</div>
 
-			<div class="card" title="Nearest expiry ATM straddle as % of spot — the market's implied expected move">
+			<div class="card" title="Nearest expiry ATM straddle as % of spot">
 				<div class="card-label">Implied Move</div>
 				<div class="card-value" class:high-move={data.straddles[0]?.straddle_pct > 5}>
-					{data.straddles[0] ? data.straddles[0].straddle_pct.toFixed(1) + '%' : '—'}
+					{data.straddles[0] ? data.straddles[0].straddle_pct.toFixed(1) + '%' : '\u2014'}
 				</div>
 				{#if data.straddles[0]}
 					<div class="card-sub">${data.straddles[0].straddle_price.toLocaleString()} straddle</div>
 				{/if}
 			</div>
 
-			<div class="card" title="Term structure slope: positive = contango (far > near), negative = backwardation (near > far)">
+			<div class="card" title="Term structure slope: positive = contango, negative = backwardation">
 				<div class="card-label">Term Structure</div>
 				<div class="card-value" style="color: {slopeColor(data.ts_slope)}">
 					{slopeLabel(data.ts_slope)}
 				</div>
 				{#if data.ts_slope !== null}
-					<div class="card-sub">{fmtPts(data.ts_slope)} slope</div>
+					<div class="card-sub">{formatPts(data.ts_slope)} slope</div>
 				{/if}
 			</div>
 
 			{#if data.skew_by_expiry.length > 0}
 				{@const nearSkew = data.skew_by_expiry[0]}
-				<div class="card" title="25-delta risk reversal on nearest expiry: positive = puts more expensive (downside fear)">
+				<div class="card" title="25-delta risk reversal on nearest expiry">
 					<div class="card-label">Skew (25&Delta;)</div>
-					<div class="card-value" style="color: {nearSkew.risk_reversal !== null ? (nearSkew.risk_reversal > 0 ? '#f85149' : '#3fb950') : '#8b949e'}">
-						{nearSkew.risk_reversal !== null ? fmtPts(nearSkew.risk_reversal) : '—'}
+					<div class="card-value" style="color: {nearSkew.risk_reversal !== null ? (nearSkew.risk_reversal > 0 ? colors.red : colors.green) : colors.textMuted}">
+						{nearSkew.risk_reversal !== null ? formatPts(nearSkew.risk_reversal) : '\u2014'}
 					</div>
 					<div class="card-sub">
 						{nearSkew.risk_reversal !== null
@@ -404,27 +383,27 @@
 					<div class="card-sub">
 						{ivPctlDisplay !== null ? `Pctl: ${ivPctlDisplay.toFixed(0)}%` : ''}
 						{#if data.market_metrics?.iv_index !== null && data.market_metrics?.iv_index !== undefined}
-							{ivPctlDisplay !== null ? ' · ' : ''}IV Index: {(data.market_metrics.iv_index * 100).toFixed(1)}%
+							{ivPctlDisplay !== null ? ' \u00B7 ' : ''}IV Index: {(data.market_metrics.iv_index * 100).toFixed(1)}%
 							{#if data.market_metrics.iv_index_5d_change !== null && data.market_metrics.iv_index_5d_change !== undefined}
 								<span class:rich={data.market_metrics.iv_index_5d_change > 0} class:cheap={data.market_metrics.iv_index_5d_change < 0}>
 									({data.market_metrics.iv_index_5d_change > 0 ? '+' : ''}{(data.market_metrics.iv_index_5d_change * 100).toFixed(1)} 5d)
 								</span>
 							{/if}
 						{:else if data.iv_rank}
-							{ivPctlDisplay !== null ? ' · ' : ''}{fmtIv(data.iv_rank.low)} — {fmtIv(data.iv_rank.high)}
+							{ivPctlDisplay !== null ? ' \u00B7 ' : ''}{formatIv(data.iv_rank.low)} \u2014 {formatIv(data.iv_rank.high)}
 						{/if}
 					</div>
 				{:else}
-					<div class="card-value muted">—</div>
+					<div class="card-value muted">{'\u2014'}</div>
 					<div class="card-sub">Fetch to build history</div>
 				{/if}
 			</div>
 
 			{#if data.market_metrics?.liquidity_rating !== null && data.market_metrics?.liquidity_rating !== undefined}
-				<div class="card" title="Tastytrade liquidity rating (1-5 stars, higher = more liquid)">
+				<div class="card" title="Tastytrade liquidity rating (1-5 stars)">
 					<div class="card-label">Liquidity</div>
-					<div class="card-value">
-						{'★'.repeat(Math.min(data.market_metrics.liquidity_rating, 5))}{'☆'.repeat(Math.max(0, 5 - data.market_metrics.liquidity_rating))}
+					<div class="card-value stars">
+						{'\u2605'.repeat(Math.min(data.market_metrics.liquidity_rating, 5))}{'\u2606'.repeat(Math.max(0, 5 - data.market_metrics.liquidity_rating))}
 					</div>
 					<div class="card-sub">Rating {data.market_metrics.liquidity_rating}/5</div>
 				</div>
@@ -432,12 +411,11 @@
 
 			<div class="card" title="Spot price estimate and chain breadth">
 				<div class="card-label">Spot / Chain</div>
-				<div class="card-value">${data.spot?.toLocaleString() ?? '—'}</div>
+				<div class="card-value">${data.spot?.toLocaleString() ?? '\u2014'}</div>
 				<div class="card-sub">{data.term_structure.length} expiries, {data.smile.length} contracts</div>
 			</div>
 		</div>
 
-		<!-- Charts row -->
 		<div class="charts-row">
 			<div class="chart-container">
 				<div bind:this={termChart} class="chart" style="height: 340px;"></div>
@@ -447,13 +425,12 @@
 			</div>
 		</div>
 
-		<!-- Smile chart with expiry selector -->
 		<div class="section">
 			<div class="smile-header">
 				<h2>Volatility Smile</h2>
 				<select bind:value={selectedSmileExpiry}>
 					{#each data.skew_by_expiry as s}
-						<option value={s.expiry}>{s.expiry} ({s.dte}d) — {s.total_contracts} contracts</option>
+						<option value={s.expiry}>{s.expiry} ({s.dte}d) \u2014 {s.total_contracts} contracts</option>
 					{/each}
 				</select>
 			</div>
@@ -461,7 +438,6 @@
 			<p class="chart-note">Green markers = positive net edge (mispriced). Hover for strike, IV, deviation, and dollar edge.</p>
 		</div>
 
-		<!-- Straddle + Skew Table -->
 		{#if data.straddles.length > 0}
 			<div class="section">
 				<h2>ATM Straddle & Skew by Expiry</h2>
@@ -470,17 +446,17 @@
 						<thead>
 							<tr>
 								<th>Expiry</th>
-								<th class="num" title="Days to expiry">DTE</th>
-								<th class="num" title="ATM implied volatility">IV</th>
-								<th class="num" title="Market IV minus model IV (vol premium)">Vol Prem</th>
-								<th class="num" title="ATM straddle as % of spot">Move%</th>
-								<th class="num" title="Straddle price in USD">Straddle</th>
-								<th class="num" title="25-delta risk reversal: put IV minus call IV">RR 25&Delta;</th>
-								<th class="num" title="Theta per day (positive = you earn)">&#920;/day</th>
-								<th class="num" title="Vega exposure per 1% IV move">Vega</th>
-								<th class="num" title="Theta earned per dollar of vega risk">&Theta;/V</th>
-								<th class="num" title="Combined bid-ask spread cost">Spread</th>
-								<th class="num" title="Breakeven range for short straddle">Breakevens</th>
+								<th class="num">DTE</th>
+								<th class="num">IV</th>
+								<th class="num">Vol Prem</th>
+								<th class="num">Move%</th>
+								<th class="num">Straddle</th>
+								<th class="num">RR 25&Delta;</th>
+								<th class="num">&#920;/day</th>
+								<th class="num">Vega</th>
+								<th class="num">&Theta;/V</th>
+								<th class="num">Spread</th>
+								<th class="num">Breakevens</th>
 							</tr>
 						</thead>
 						<tbody>
@@ -489,24 +465,24 @@
 								<tr>
 									<td class="mono">{s.expiry}</td>
 									<td class="num" class:dte-urgent={s.dte <= 3} class:dte-warn={s.dte > 3 && s.dte <= 7}>{s.dte}d</td>
-									<td class="num">{fmtIv(s.atm_iv)}</td>
+									<td class="num">{formatIv(s.atm_iv)}</td>
 									<td class="num" class:rich={s.vol_premium !== null && s.vol_premium > 0} class:cheap={s.vol_premium !== null && s.vol_premium < 0}>
-										{s.vol_premium !== null ? fmtPts(s.vol_premium) : '—'}
+										{s.vol_premium !== null ? formatPts(s.vol_premium) : '\u2014'}
 									</td>
 									<td class="num implied-move" class:high-move={s.straddle_pct > 5}>{s.straddle_pct.toFixed(1)}%</td>
 									<td class="num straddle-price">${s.straddle_price.toLocaleString()}</td>
 									<td class="num" class:put-skew={s.risk_reversal !== null && s.risk_reversal > 0} class:call-skew={s.risk_reversal !== null && s.risk_reversal < 0}>
-										{s.risk_reversal !== null ? fmtPts(s.risk_reversal) : '—'}
+										{s.risk_reversal !== null ? formatPts(s.risk_reversal) : '\u2014'}
 									</td>
 									<td class="num" class:positive={s.total_theta !== null && s.total_theta < 0}>
-										{s.total_theta !== null ? '$' + Math.abs(s.total_theta).toFixed(2) : '—'}
+										{s.total_theta !== null ? '$' + Math.abs(s.total_theta).toFixed(2) : '\u2014'}
 									</td>
-									<td class="num">{s.total_vega !== null ? '$' + s.total_vega.toFixed(2) : '—'}</td>
-									<td class="num" title="Higher = better theta-to-vega ratio for short vol">
-										{s.theta_vega_ratio !== null ? s.theta_vega_ratio.toFixed(2) : '—'}
+									<td class="num">{s.total_vega !== null ? '$' + s.total_vega.toFixed(2) : '\u2014'}</td>
+									<td class="num">
+										{s.theta_vega_ratio !== null ? s.theta_vega_ratio.toFixed(2) : '\u2014'}
 									</td>
 									<td class="num dim">${s.total_spread.toFixed(2)}</td>
-									<td class="num breakevens">${s.breakeven_down.toLocaleString()} — ${s.breakeven_up.toLocaleString()}</td>
+									<td class="num breakevens">${s.breakeven_down.toLocaleString()} \u2014 ${s.breakeven_up.toLocaleString()}</td>
 								</tr>
 							{/each}
 						</tbody>
@@ -515,7 +491,6 @@
 			</div>
 		{/if}
 
-		<!-- Per-expiry mispricing summary -->
 		{#if data.skew_by_expiry.some(s => s.contracts_with_edge > 0)}
 			<div class="section">
 				<h2>Mispricing by Expiry</h2>
@@ -525,11 +500,11 @@
 							<tr>
 								<th>Expiry</th>
 								<th class="num">DTE</th>
-								<th class="num" title="Average market-model deviation across all strikes">Avg Dev</th>
-								<th class="num" title="Maximum absolute deviation (biggest outlier)">Max Dev</th>
-								<th class="num" title="Contracts with positive net edge after spread">Edge Contracts</th>
-								<th class="num" title="Total contracts in this expiry">Total</th>
-								<th class="num" title="Total absolute vega in this expiry">Total Vega</th>
+								<th class="num">Avg Dev</th>
+								<th class="num">Max Dev</th>
+								<th class="num">Edge Contracts</th>
+								<th class="num">Total</th>
+								<th class="num">Total Vega</th>
 							</tr>
 						</thead>
 						<tbody>
@@ -537,9 +512,9 @@
 								<tr>
 									<td class="mono">{s.expiry}</td>
 									<td class="num" class:dte-urgent={s.dte <= 3} class:dte-warn={s.dte > 3 && s.dte <= 7}>{s.dte}d</td>
-									<td class="num">{fmtPts(s.avg_deviation)}</td>
+									<td class="num">{formatPts(s.avg_deviation)}</td>
 									<td class="num" class:high-dev={s.max_deviation !== null && s.max_deviation > 0.05}>
-										{s.max_deviation !== null ? (s.max_deviation * 100).toFixed(1) + 'pts' : '—'}
+										{s.max_deviation !== null ? (s.max_deviation * 100).toFixed(1) + 'pts' : '\u2014'}
 									</td>
 									<td class="num" class:has-edge={s.contracts_with_edge > 0}>
 										{s.contracts_with_edge}
@@ -554,7 +529,6 @@
 			</div>
 		{/if}
 
-		<!-- Earnings & Dividends -->
 		{#if data.earnings.length > 0 || data.dividends.length > 0}
 			<div class="section corporate-events">
 				<div class="events-row">
@@ -574,7 +548,7 @@
 											<tr>
 												<td class="mono">{e.date}</td>
 												<td class="num" class:positive={e.eps !== null && e.eps > 0} class:negative-eps={e.eps !== null && e.eps < 0}>
-													{e.eps !== null ? '$' + e.eps.toFixed(2) : '—'}
+													{e.eps !== null ? '$' + e.eps.toFixed(2) : '\u2014'}
 												</td>
 											</tr>
 										{/each}
@@ -599,7 +573,7 @@
 										{#each data.dividends.slice(0, 12) as d}
 											<tr>
 												<td class="mono">{d.date}</td>
-												<td class="num">{d.amount !== null ? '$' + d.amount.toFixed(4) : '—'}</td>
+												<td class="num">{d.amount !== null ? '$' + d.amount.toFixed(4) : '\u2014'}</td>
 											</tr>
 										{/each}
 									</tbody>
@@ -625,33 +599,32 @@
 	}
 
 	h1 { font-size: 1.5rem; margin: 0; }
-	h2 { font-size: 1rem; margin: 0 0 0.75rem 0; color: #c9d1d9; }
+	h2 { font-size: 1rem; margin: 0 0 0.75rem 0; color: var(--text); }
 
 	.controls { display: flex; gap: 0.5rem; align-items: center; }
 
 	.current-symbol {
-		background: #388bfd26;
-		color: #58a6ff;
+		background: var(--badge-blue);
+		color: var(--blue);
 		padding: 0.35rem 0.75rem;
 		border-radius: 6px;
 		font-weight: 600;
 		font-size: 0.875rem;
 	}
 
-	.hint { color: #484f58; font-size: 0.8rem; }
-	.loading-indicator { color: #8b949e; font-size: 0.8rem; }
+	.hint { color: var(--text-muted); font-size: 0.8rem; }
+	.loading-indicator { color: var(--text-secondary); font-size: 0.8rem; }
 
 	select {
-		background: #21262d;
-		color: #c9d1d9;
-		border: 1px solid #30363d;
+		background: var(--bg-input);
+		color: var(--text);
+		border: 1px solid var(--border);
 		padding: 0.4rem 0.6rem;
 		border-radius: 6px;
 		cursor: pointer;
 		font-size: 0.8rem;
 	}
 
-	/* Cards */
 	.cards {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
@@ -660,43 +633,45 @@
 	}
 
 	.card {
-		background: #161b22;
-		border: 1px solid #30363d;
+		background: var(--bg-card);
+		border: 1px solid var(--border-light);
 		border-radius: 8px;
 		padding: 0.75rem;
+		box-shadow: var(--shadow-sm);
 	}
 
 	.card-label {
 		font-size: 0.65rem;
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
-		color: #8b949e;
+		color: var(--text-secondary);
 		margin-bottom: 0.25rem;
 	}
 
 	.card-value {
 		font-size: 1.35rem;
 		font-weight: 700;
-		color: #e1e4e8;
+		color: var(--text);
 		font-variant-numeric: tabular-nums;
 	}
 
-	.card-value.muted { color: #484f58; }
-	.card-value.high-move { color: #f85149; }
+	.card-value.muted { color: var(--text-muted); }
+	.card-value.high-move { color: var(--red); }
+	.card-value.stars { color: var(--yellow); }
 
 	.card-sub {
 		font-size: 0.65rem;
-		color: #484f58;
+		color: var(--text-muted);
 		margin-top: 0.2rem;
 	}
 
 	.vol-premium { font-weight: 600; }
-	.vol-premium.rich { color: #f85149; }
-	.vol-premium.cheap { color: #3fb950; }
+	.vol-premium.rich { color: var(--red); }
+	.vol-premium.cheap { color: var(--green); }
 
 	.rank-bar {
 		height: 4px;
-		background: #21262d;
+		background: var(--border-light);
 		border-radius: 2px;
 		margin: 0.35rem 0;
 		overflow: hidden;
@@ -708,7 +683,6 @@
 		transition: width 0.3s;
 	}
 
-	/* Charts */
 	.charts-row {
 		display: grid;
 		grid-template-columns: 1fr 1fr;
@@ -717,10 +691,11 @@
 	}
 
 	.chart-container {
-		background: #161b22;
-		border: 1px solid #30363d;
+		background: var(--bg-card);
+		border: 1px solid var(--border-light);
 		border-radius: 8px;
 		padding: 0.5rem;
+		box-shadow: var(--shadow-sm);
 	}
 
 	.chart { width: 100%; }
@@ -739,11 +714,10 @@
 	.chart-note {
 		text-align: center;
 		font-size: 0.65rem;
-		color: #484f58;
+		color: var(--text-muted);
 		margin-top: 0.25rem;
 	}
 
-	/* Tables */
 	.table-wrapper { overflow-x: auto; }
 
 	table {
@@ -755,8 +729,8 @@
 	th {
 		text-align: left;
 		padding: 0.4rem 0.5rem;
-		border-bottom: 2px solid #30363d;
-		color: #8b949e;
+		border-bottom: 2px solid var(--border);
+		color: var(--text-secondary);
 		font-weight: 600;
 		font-size: 0.65rem;
 		text-transform: uppercase;
@@ -766,10 +740,10 @@
 
 	td {
 		padding: 0.35rem 0.5rem;
-		border-bottom: 1px solid #21262d;
+		border-bottom: 1px solid var(--border-light);
 	}
 
-	tr:hover { background: #161b22; }
+	tr:hover { background: var(--hover-bg); }
 
 	.mono {
 		font-family: 'SF Mono', 'Consolas', monospace;
@@ -781,24 +755,24 @@
 		font-variant-numeric: tabular-nums;
 	}
 
-	.dim { color: #484f58; }
-	.straddle-price { font-weight: 600; color: #f0883e; }
-	.implied-move { color: #c9d1d9; }
-	.implied-move.high-move { color: #f85149; font-weight: 600; }
-	.breakevens { font-size: 0.68rem; color: #484f58; white-space: nowrap; }
+	.dim { color: var(--text-muted); }
+	.straddle-price { font-weight: 600; color: var(--orange); }
+	.implied-move { color: var(--text); }
+	.implied-move.high-move { color: var(--red); font-weight: 600; }
+	.breakevens { font-size: 0.68rem; color: var(--text-muted); white-space: nowrap; }
 
-	.rich { color: #f85149; font-weight: 600; }
-	.cheap { color: #3fb950; font-weight: 600; }
-	.positive { color: #3fb950; }
-	.put-skew { color: #f85149; }
-	.call-skew { color: #3fb950; }
-	.has-edge { color: #3fb950; font-weight: 600; }
-	.high-dev { color: #f0883e; font-weight: 600; }
+	.rich { color: var(--red); font-weight: 600; }
+	.cheap { color: var(--green); font-weight: 600; }
+	.positive { color: var(--green); }
+	.put-skew { color: var(--red); }
+	.call-skew { color: var(--green); }
+	.has-edge { color: var(--green); font-weight: 600; }
+	.high-dev { color: var(--orange); font-weight: 600; }
 
-	.dte-urgent { color: #f85149; font-weight: 600; }
-	.dte-warn { color: #f0883e; }
+	.dte-urgent { color: var(--red); font-weight: 600; }
+	.dte-warn { color: var(--orange); }
 
-	.negative-eps { color: #f85149; }
+	.negative-eps { color: var(--red); }
 
 	.events-row {
 		display: grid;
@@ -807,16 +781,17 @@
 	}
 
 	.event-table {
-		background: #161b22;
-		border: 1px solid #30363d;
+		background: var(--bg-card);
+		border: 1px solid var(--border-light);
 		border-radius: 8px;
 		padding: 0.75rem;
+		box-shadow: var(--shadow-sm);
 	}
 
 	.event-table h2 { margin-bottom: 0.5rem; }
 
-	.error { color: #f85149; }
-	.placeholder { color: #8b949e; text-align: center; padding: 3rem; }
+	.error { color: var(--red); }
+	.placeholder { color: var(--text-secondary); text-align: center; padding: 3rem; }
 
 	@media (max-width: 900px) {
 		.charts-row { grid-template-columns: 1fr; }

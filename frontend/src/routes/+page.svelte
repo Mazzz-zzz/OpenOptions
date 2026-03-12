@@ -31,5 +31,5 @@
 		margin: 0;
 	}
 
-	.status { text-align: center; color: #8b949e; padding: 2rem; }
+	.status { text-align: center; color: var(--text-secondary); padding: 2rem; }
 </style>

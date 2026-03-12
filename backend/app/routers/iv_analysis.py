@@ -1,4 +1,4 @@
-"""GET /iv-analysis/{underlying} — IV analysis: term structure, skew, smile, straddles."""
+"""GET /iv-analysis/{underlying} — IV analysis: term structure, skew, smile, straddles, forwards."""
 from __future__ import annotations
 
 import math
@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Contract, Dividend, Earning, Snapshot, Underlying
+from app.services.pricing import time_to_expiry
 
 router = APIRouter()
 
@@ -101,8 +102,8 @@ async def get_iv_analysis(
     if not current:
         return {
             "term_structure": [], "skew_by_expiry": [], "smile": [],
-            "iv_rank": None, "straddles": [], "spot": None,
-            "historical_iv": [], "put_call_summary": None,
+            "iv_rank": None, "straddles": [], "forwards": [], "opportunities": [],
+            "spot": None, "historical_iv": [], "put_call_summary": None,
             "market_metrics": market_metrics, "earnings": earnings, "dividends": dividends,
             "ts_slope": None,
         }
@@ -124,16 +125,20 @@ async def get_iv_analysis(
     if spot <= 0:
         return {
             "term_structure": [], "skew_by_expiry": [], "smile": [],
-            "iv_rank": None, "straddles": [], "spot": None,
-            "historical_iv": [], "put_call_summary": None,
+            "iv_rank": None, "straddles": [], "forwards": [], "opportunities": [],
+            "spot": None, "historical_iv": [], "put_call_summary": None,
             "market_metrics": market_metrics, "earnings": earnings, "dividends": dividends,
             "ts_slope": None,
         }
 
-    # --- 2. Term structure + skew + straddles per expiry ---
+    # Risk-free rate assumption for forward pricing
+    r = 0.05
+
+    # --- 2. Term structure + skew + straddles + forwards per expiry ---
     term_structure = []
     straddles = []
     skew_by_expiry = []
+    forwards = []
 
     # Collect all smile points across all expiries
     all_smile_points = []
@@ -320,7 +325,85 @@ async def get_iv_analysis(
                 "risk_reversal": risk_reversal,
             })
 
-    # --- 3. Put/Call summary across all contracts ---
+        # --- Synthetic forward from put-call parity ---
+        # F = K + e^(rT) * (C_mid - P_mid)
+        T = time_to_expiry(expiry)
+        # Group by strike: {strike: {"C": snap, "P": snap}}
+        strike_pairs = defaultdict(dict)
+        for snap, contract in points:
+            if snap.mid is not None and float(snap.mid) > 0:
+                strike_pairs[float(contract.strike)][contract.option_type] = snap
+
+        pair_forwards = []
+        for strike, sides in sorted(strike_pairs.items()):
+            if "C" not in sides or "P" not in sides:
+                continue
+            c_mid = float(sides["C"].mid)
+            p_mid = float(sides["P"].mid)
+            synth_fwd = strike + math.exp(r * T) * (c_mid - p_mid)
+            # Parity violation: |C - P - (S*e^(rT) - K)| relative to max price
+            theoretical_diff = spot * math.exp(r * T) - strike
+            actual_diff = c_mid - p_mid
+            violation = abs(actual_diff - theoretical_diff / math.exp(r * T))
+            max_price = max(c_mid, p_mid, 0.01)
+            violation_pct = (violation / max_price) * 100
+
+            pair_forwards.append({
+                "strike": strike,
+                "call_mid": round(c_mid, 4),
+                "put_mid": round(p_mid, 4),
+                "synthetic_forward": round(synth_fwd, 4),
+                "violation_pct": round(violation_pct, 2),
+            })
+
+        # Best estimate: ATM pair
+        if pair_forwards:
+            atm_fwd = min(pair_forwards, key=lambda p: abs(p["strike"] - spot))
+            implied_yield = None
+            if atm_fwd["synthetic_forward"] > 0 and T > 0:
+                implied_yield = round(
+                    math.log(atm_fwd["synthetic_forward"] / spot) / T, 6
+                )
+            forwards.append({
+                "expiry": expiry.isoformat(),
+                "dte": dte,
+                "forward_price": atm_fwd["synthetic_forward"],
+                "implied_yield": implied_yield,
+                "basis": round(atm_fwd["synthetic_forward"] - spot, 4),
+                "basis_pct": round((atm_fwd["synthetic_forward"] / spot - 1) * 100, 4) if spot > 0 else None,
+                "pairs": pair_forwards,
+            })
+
+    # --- 3. Ranked opportunities: best net_edge across all contracts ---
+    opportunities = []
+    for snap, contract in current:
+        if _days_to_expiry(contract.expiry) <= 0:
+            continue
+        if snap.net_edge is None or snap.deviation is None:
+            continue
+        edge = float(snap.net_edge)
+        if edge <= 0:
+            continue
+        opportunities.append({
+            "symbol": contract.symbol,
+            "underlying": contract.underlying,
+            "strike": float(contract.strike),
+            "expiry": contract.expiry.isoformat(),
+            "dte": _days_to_expiry(contract.expiry),
+            "option_type": contract.option_type,
+            "market_iv": round(float(snap.market_iv), 6) if snap.market_iv else None,
+            "model_iv": round(float(snap.model_iv), 6) if snap.model_iv else None,
+            "deviation": round(float(snap.deviation), 6),
+            "net_edge": round(edge, 2),
+            "vega": round(float(snap.vega), 4) if snap.vega is not None else None,
+            "delta": round(float(snap.delta_market), 4) if snap.delta_market is not None else None,
+            "bid": float(snap.bid) if snap.bid else None,
+            "ask": float(snap.ask) if snap.ask else None,
+        })
+    opportunities.sort(key=lambda x: x["net_edge"], reverse=True)
+    opportunities = opportunities[:50]  # top 50
+
+    # --- 4. Put/Call summary across all contracts ---
     all_puts = [(s, c) for s, c in current if c.option_type == "P" and _days_to_expiry(c.expiry) > 0]
     all_calls = [(s, c) for s, c in current if c.option_type == "C" and _days_to_expiry(c.expiry) > 0]
     avg_put_iv = sum(float(s.market_iv) for s, c in all_puts) / len(all_puts) if all_puts else None
@@ -338,7 +421,7 @@ async def get_iv_analysis(
         "call_count": len(all_calls),
     }
 
-    # --- 4. IV Rank from historical data ---
+    # --- 5. IV Rank from historical data ---
     cutoff = date.today() - timedelta(days=lookback_days)
     atm_lower = spot * 0.95
     atm_upper = spot * 1.05
@@ -382,7 +465,7 @@ async def get_iv_analysis(
         below = sum(1 for v in hist_values if v < current_atm_iv)
         iv_percentile = round(below / len(hist_values) * 100, 1)
 
-    # --- 5. Term structure slope ---
+    # --- 6. Term structure slope ---
     ts_slope = None
     if len(term_structure) >= 2:
         near_iv = term_structure[0]["atm_iv"]
@@ -396,6 +479,8 @@ async def get_iv_analysis(
         "skew_by_expiry": skew_by_expiry,
         "smile": all_smile_points,
         "straddles": straddles,
+        "forwards": forwards,
+        "opportunities": opportunities,
         "put_call_summary": put_call_summary,
         "iv_rank": {
             "current_iv": current_atm_iv,

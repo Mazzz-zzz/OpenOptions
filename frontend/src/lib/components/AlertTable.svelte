@@ -1,6 +1,7 @@
 <script lang="ts">
-	import { alerts } from '$lib/stores';
+	import { alerts, addToast } from '$lib/stores';
 	import { api, type Alert } from '$lib/api';
+	import { getDte, formatIv, formatDeviation, formatDollar, formatGreek } from '$lib/utils';
 
 	type SortKey = keyof Alert | 'dte' | 'spread';
 	let sortKey = $state<SortKey>('net_edge');
@@ -11,8 +12,12 @@
 	let filterConfidence = $state('');
 
 	async function dismiss(id: number) {
-		await api.dismissAlert(id);
-		await alerts.refresh();
+		try {
+			await api.dismissAlert(id);
+			await alerts.refresh();
+		} catch (e) {
+			addToast('Failed to dismiss alert', 'error');
+		}
 	}
 
 	function toggleSort(key: SortKey) {
@@ -27,11 +32,6 @@
 	function sortIndicator(key: SortKey): string {
 		if (sortKey !== key) return '';
 		return sortDir === 'asc' ? ' \u25B2' : ' \u25BC';
-	}
-
-	function getDte(expiry: string): number {
-		const diff = new Date(expiry + 'T00:00:00').getTime() - new Date().getTime();
-		return Math.max(0, Math.ceil(diff / 86400000));
 	}
 
 	function getSpread(alert: Alert): number | null {
@@ -77,69 +77,49 @@
 	});
 
 	let underlyings = $derived([...new Set($alerts.items.map(a => a.underlying))].sort());
-
-	function formatIv(iv: number | null): string {
-		if (iv === null) return '\u2014';
-		return (iv * 100).toFixed(2) + '%';
-	}
-
-	function formatDeviation(dev: number | null): string {
-		if (dev === null) return '\u2014';
-		return (dev > 0 ? '+' : '') + (dev * 100).toFixed(2);
-	}
-
-	function formatDollar(val: number | null): string {
-		if (val === null) return '\u2014';
-		return '$' + val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-	}
-
-	function formatGreek(val: number | null, decimals = 4): string {
-		if (val === null) return '\u2014';
-		return val.toFixed(decimals);
-	}
 </script>
 
 <div class="controls">
 	<input type="text" placeholder="Search symbol..." bind:value={search} class="search" title="Filter alerts by contract symbol name" />
-	<select bind:value={filterUnderlying} title="Filter by underlying asset (e.g. BTC, ETH)">
+	<select bind:value={filterUnderlying} title="Filter by underlying asset">
 		<option value="">All Underlyings</option>
 		{#each underlyings as u}
 			<option value={u}>{u}</option>
 		{/each}
 	</select>
-	<select bind:value={filterSignal} title="Filter by detection method — Surface Outlier (IV vs fitted surface) or Greek Divergence (delta/vega mismatch)">
+	<select bind:value={filterSignal} title="Filter by detection method">
 		<option value="">All Signals</option>
 		<option value="surface_outlier">Surface Outlier</option>
 		<option value="greek_divergence">Greek Divergence</option>
 	</select>
-	<select bind:value={filterConfidence} title="Filter by confidence level — based on deviation size and vega magnitude">
+	<select bind:value={filterConfidence} title="Filter by confidence level">
 		<option value="">All Confidence</option>
 		<option value="high">High</option>
 		<option value="medium">Medium</option>
 		<option value="low">Low</option>
 	</select>
-	<span class="count" title="Number of alerts shown after filters / total alerts">{filtered.length} of {$alerts.items.length}</span>
+	<span class="count">{filtered.length} of {$alerts.items.length}</span>
 </div>
 
 <div class="table-wrapper">
 	<table>
 		<thead>
 			<tr>
-				<th class="sortable" onclick={() => toggleSort('symbol')} title="Option contract ticker (e.g. BTC-27MAR26-85000-C). Click to sort.">Symbol{sortIndicator('symbol')}</th>
-				<th class="sortable num" onclick={() => toggleSort('strike')} title="Strike price in USD. Click to sort.">Strike{sortIndicator('strike')}</th>
-				<th class="sortable" onclick={() => toggleSort('expiry')} title="Expiration date. Click to sort.">Expiry{sortIndicator('expiry')}</th>
-				<th class="sortable num" onclick={() => toggleSort('dte')} title="Days to expiry — calendar days until the option expires. Click to sort.">DTE{sortIndicator('dte')}</th>
-				<th title="Option type: C = Call, P = Put">Type</th>
-				<th title="Detection method: Surface = IV deviates from fitted vol surface; Greek = delta/vega divergence">Signal</th>
-				<th class="sortable" onclick={() => toggleSort('confidence')} title="Signal confidence level. High = strong edge, Medium = moderate, Low = marginal. Click to sort.">Conf{sortIndicator('confidence')}</th>
-				<th class="sortable num" onclick={() => toggleSort('market_iv')} title="Market Implied Volatility from the bid/ask mid price. Click to sort.">Mkt IV{sortIndicator('market_iv')}</th>
-				<th class="sortable num" onclick={() => toggleSort('model_iv')} title="Model IV predicted by the fitted SVI volatility surface. Click to sort.">Mdl IV{sortIndicator('model_iv')}</th>
-				<th class="sortable num" onclick={() => toggleSort('deviation')} title="Deviation = (market IV - model IV) x 100 vol points. Positive = rich, Negative = cheap. Click to sort.">Dev{sortIndicator('deviation')}</th>
-				<th class="sortable num" onclick={() => toggleSort('spread')} title="Bid-Ask spread in USD. Wider spread = lower liquidity, harder to capture edge. Click to sort.">Spread{sortIndicator('spread')}</th>
-				<th class="sortable num" onclick={() => toggleSort('net_edge')} title="Net Edge ($) = |deviation| x 100 x vega - half spread. Dollar profit after crossing the spread. Click to sort.">Edge ($){sortIndicator('net_edge')}</th>
-				<th class="sortable num" onclick={() => toggleSort('gamma')} title="Gamma — rate of change of delta per $1 move in the underlying. Higher = more convexity risk. Click to sort.">&Gamma;{sortIndicator('gamma')}</th>
-				<th class="sortable num" onclick={() => toggleSort('theta')} title="Theta — daily time decay in USD. Negative = option loses value each day. Click to sort.">&Theta;{sortIndicator('theta')}</th>
-				<th title="Dismiss this alert"></th>
+				<th class="sortable" onclick={() => toggleSort('symbol')}>Symbol{sortIndicator('symbol')}</th>
+				<th class="sortable num" onclick={() => toggleSort('strike')}>Strike{sortIndicator('strike')}</th>
+				<th class="sortable" onclick={() => toggleSort('expiry')}>Expiry{sortIndicator('expiry')}</th>
+				<th class="sortable num" onclick={() => toggleSort('dte')}>DTE{sortIndicator('dte')}</th>
+				<th>Type</th>
+				<th>Signal</th>
+				<th class="sortable" onclick={() => toggleSort('confidence')}>Conf{sortIndicator('confidence')}</th>
+				<th class="sortable num" onclick={() => toggleSort('market_iv')}>Mkt IV{sortIndicator('market_iv')}</th>
+				<th class="sortable num" onclick={() => toggleSort('model_iv')}>Mdl IV{sortIndicator('model_iv')}</th>
+				<th class="sortable num" onclick={() => toggleSort('deviation')}>Dev{sortIndicator('deviation')}</th>
+				<th class="sortable num" onclick={() => toggleSort('spread')}>Spread{sortIndicator('spread')}</th>
+				<th class="sortable num" onclick={() => toggleSort('net_edge')}>Edge ($){sortIndicator('net_edge')}</th>
+				<th class="sortable num" onclick={() => toggleSort('gamma')}>&Gamma;{sortIndicator('gamma')}</th>
+				<th class="sortable num" onclick={() => toggleSort('theta')}>&Theta;{sortIndicator('theta')}</th>
+				<th><span class="sr-only">Dismiss</span></th>
 			</tr>
 		</thead>
 		<tbody>
@@ -150,42 +130,35 @@
 					<td class="mono">{alert.symbol}</td>
 					<td class="num">{alert.strike.toLocaleString()}</td>
 					<td>{alert.expiry}</td>
-					<td class="num" class:dte-urgent={dte <= 3} class:dte-warn={dte > 3 && dte <= 7}
-						title={`${dte} calendar days until expiry`}>{dte}d</td>
+					<td class="num" class:dte-urgent={dte <= 3} class:dte-warn={dte > 3 && dte <= 7}>{dte}d</td>
 					<td>{alert.option_type}</td>
 					<td>
-						<span class="badge" class:surface={alert.signal_type === 'surface_outlier'} class:greek={alert.signal_type === 'greek_divergence'}
-							title={alert.signal_type === 'surface_outlier' ? 'Surface Outlier: market IV deviates from fitted vol surface' : 'Greek Divergence: delta/vega diverge between market and model'}>
+						<span class="badge" class:surface={alert.signal_type === 'surface_outlier'} class:greek={alert.signal_type === 'greek_divergence'}>
 							{alert.signal_type === 'surface_outlier' ? 'Srf' : 'Grk'}
 						</span>
 					</td>
 					<td>
 						{#if alert.confidence}
-							<span class="conf-badge conf-{alert.confidence}" title={alert.confidence === 'high' ? 'High: large deviation + significant vega' : alert.confidence === 'medium' ? 'Medium: moderate edge' : 'Low: marginal edge'}>{alert.confidence}</span>
+							<span class="conf-badge conf-{alert.confidence}">{alert.confidence}</span>
 						{:else}
-							<span class="conf-badge conf-low" title="No confidence level">—</span>
+							<span class="conf-badge conf-low">{'\u2014'}</span>
 						{/if}
 					</td>
-					<td class="num">{formatIv(alert.market_iv)}</td>
-					<td class="num">{formatIv(alert.model_iv)}</td>
-					<td class="num" class:positive={alert.deviation !== null && alert.deviation > 0} class:negative={alert.deviation !== null && alert.deviation < 0}
-						title={alert.deviation !== null ? `Market IV is ${alert.deviation > 0 ? 'above' : 'below'} model by ${Math.abs(alert.deviation * 100).toFixed(2)} vol pts` : ''}>
+					<td class="num">{formatIv(alert.market_iv, 2)}</td>
+					<td class="num">{formatIv(alert.model_iv, 2)}</td>
+					<td class="num" class:positive={alert.deviation !== null && alert.deviation > 0} class:negative={alert.deviation !== null && alert.deviation < 0}>
 						{formatDeviation(alert.deviation)}
 					</td>
-					<td class="num spread" class:wide-spread={spread !== null && alert.net_edge !== null && spread > alert.net_edge * 2}
-						title={spread !== null ? `Bid: ${formatDollar(alert.bid)} / Ask: ${formatDollar(alert.ask)}` : ''}>
-						{spread !== null ? formatDollar(spread) : '—'}
+					<td class="num spread" class:wide-spread={spread !== null && alert.net_edge !== null && spread > alert.net_edge * 2}>
+						{spread !== null ? formatDollar(spread) : '\u2014'}
 					</td>
-					<td class="num edge" title={alert.net_edge !== null ? `$${alert.net_edge.toFixed(2)} profit after spread (= |dev| x 100 x vega - half_spread)` : ''}>{formatDollar(alert.net_edge)}</td>
-					<td class="num greek" title={alert.gamma !== null ? `Delta changes by ${alert.gamma.toFixed(6)} per $1 move in underlying` : ''}>
-						{formatGreek(alert.gamma, 6)}
-					</td>
-					<td class="num greek" class:negative={alert.theta !== null && alert.theta < 0}
-						title={alert.theta !== null ? `Loses $${Math.abs(alert.theta).toFixed(2)} per day from time decay` : ''}>
-						{alert.theta !== null ? formatDollar(alert.theta) : '—'}
+					<td class="num edge">{formatDollar(alert.net_edge)}</td>
+					<td class="num greek">{formatGreek(alert.gamma, 6)}</td>
+					<td class="num greek" class:negative={alert.theta !== null && alert.theta < 0}>
+						{alert.theta !== null ? formatDollar(alert.theta) : '\u2014'}
 					</td>
 					<td>
-						<button class="dismiss-btn" onclick={() => dismiss(alert.id)} title="Dismiss — marks as reviewed">&#x2715;</button>
+						<button class="dismiss-btn" onclick={() => dismiss(alert.id)} title="Dismiss" aria-label="Dismiss alert">&#x2715;</button>
 					</td>
 				</tr>
 			{/each}
@@ -193,7 +166,7 @@
 	</table>
 
 	{#if $alerts.items.length === 0}
-		<p class="empty">No active alerts. Click a Fetch button to scan for mispricings.</p>
+		<p class="empty">No active alerts. Fetch a symbol to scan for mispricings.</p>
 	{:else if filtered.length === 0}
 		<p class="empty">No alerts match your filters.</p>
 	{/if}
@@ -211,15 +184,15 @@
 	.search { width: 180px; }
 
 	.count {
-		color: #8b949e;
+		color: var(--text-secondary);
 		font-size: 0.8rem;
 		margin-left: auto;
 	}
 
 	input, select {
-		background: #21262d;
-		color: #c9d1d9;
-		border: 1px solid #30363d;
+		background: var(--bg-input);
+		color: var(--text);
+		border: 1px solid var(--border);
 		padding: 0.4rem 0.6rem;
 		border-radius: 6px;
 		font-size: 0.8rem;
@@ -236,8 +209,8 @@
 	th {
 		text-align: left;
 		padding: 0.4rem 0.5rem;
-		border-bottom: 2px solid #30363d;
-		color: #8b949e;
+		border-bottom: 2px solid var(--border);
+		color: var(--text-secondary);
 		font-weight: 600;
 		font-size: 0.7rem;
 		text-transform: uppercase;
@@ -246,14 +219,14 @@
 	}
 
 	th.sortable { cursor: pointer; user-select: none; }
-	th.sortable:hover { color: #c9d1d9; }
+	th.sortable:hover { color: var(--text); }
 
 	td {
 		padding: 0.35rem 0.5rem;
-		border-bottom: 1px solid #21262d;
+		border-bottom: 1px solid var(--border-light);
 	}
 
-	tr:hover { background: #161b22; }
+	tr:hover { background: var(--hover-bg); }
 
 	.mono {
 		font-family: 'SF Mono', 'Consolas', monospace;
@@ -265,17 +238,17 @@
 		font-variant-numeric: tabular-nums;
 	}
 
-	.positive { color: #3fb950; }
-	.negative { color: #f85149; }
-	.edge { font-weight: 600; color: #f0883e; }
+	.positive { color: var(--green); }
+	.negative { color: var(--red); }
+	.edge { font-weight: 600; color: var(--orange); }
 
-	.dte-urgent { color: #f85149; font-weight: 600; }
-	.dte-warn { color: #f0883e; }
+	.dte-urgent { color: var(--red); font-weight: 600; }
+	.dte-warn { color: var(--orange); }
 
-	.spread { color: #8b949e; }
-	.wide-spread { color: #f85149; }
+	.spread { color: var(--text-secondary); }
+	.wide-spread { color: var(--red); }
 
-	.greek { color: #8b949e; font-size: 0.73rem; }
+	.greek { color: var(--text-secondary); font-size: 0.73rem; }
 
 	.badge {
 		display: inline-block;
@@ -286,13 +259,13 @@
 	}
 
 	.badge.surface {
-		background: rgba(56, 139, 253, 0.15);
-		color: #58a6ff;
+		background: var(--badge-blue);
+		color: var(--blue);
 	}
 
 	.badge.greek {
-		background: rgba(240, 136, 62, 0.15);
-		color: #f0883e;
+		background: var(--badge-orange);
+		color: var(--orange);
 	}
 
 	.conf-badge {
@@ -302,14 +275,14 @@
 		border-radius: 4px;
 	}
 
-	.conf-high { color: #3fb950; background: rgba(63, 185, 80, 0.15); }
-	.conf-medium { color: #f0883e; background: rgba(240, 136, 62, 0.15); }
-	.conf-low { color: #8b949e; background: rgba(139, 148, 158, 0.15); }
+	.conf-high { color: var(--green); background: var(--badge-green); }
+	.conf-medium { color: var(--orange); background: var(--badge-orange); }
+	.conf-low { color: var(--text-secondary); background: var(--badge-muted); }
 
 	.dismiss-btn {
 		background: none;
 		border: 1px solid transparent;
-		color: #484f58;
+		color: var(--text-muted);
 		padding: 0.1rem 0.3rem;
 		border-radius: 4px;
 		cursor: pointer;
@@ -318,13 +291,24 @@
 	}
 
 	.dismiss-btn:hover {
-		border-color: #f85149;
-		color: #f85149;
+		border-color: var(--red);
+		color: var(--red);
 	}
 
 	.empty {
 		text-align: center;
-		color: #8b949e;
+		color: var(--text-secondary);
 		padding: 2rem;
+	}
+
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		border: 0;
 	}
 </style>

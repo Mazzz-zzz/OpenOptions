@@ -1,6 +1,24 @@
 import { writable, get } from 'svelte/store';
 import { api, type Alert, type SurfaceData, type Contract } from './api';
 
+// --- Toast Notifications ---
+export interface Toast {
+	id: number;
+	message: string;
+	type: 'success' | 'error' | 'info';
+}
+
+let toastId = 0;
+export const toasts = writable<Toast[]>([]);
+
+export function addToast(message: string, type: Toast['type'] = 'info') {
+	const id = ++toastId;
+	toasts.update(t => [...t, { id, message, type }]);
+	setTimeout(() => {
+		toasts.update(t => t.filter(toast => toast.id !== id));
+	}, 4000);
+}
+
 // --- Global Selected Underlying ---
 export const selectedUnderlying = writable<string>('');
 export const fetchStatus = writable<{ loading: boolean; result: string | null; error: string | null }>({
@@ -23,19 +41,14 @@ export async function fetchUnderlying(symbol: string) {
 	fetchStatus.set({ loading: true, result: null, error: null });
 	try {
 		const res = await api.fetchChain(symbol);
-		fetchStatus.set({
-			loading: false,
-			result: `${res.alerts_raised} alerts / ${res.snapshots} contracts`,
-			error: null,
-		});
-		// Refresh alerts after fresh fetch
+		const msg = `${res.alerts_raised} alerts / ${res.snapshots} contracts`;
+		fetchStatus.set({ loading: false, result: msg, error: null });
+		addToast(`${symbol}: ${msg}`, 'success');
 		await alerts.refresh();
 	} catch (e) {
-		fetchStatus.set({
-			loading: false,
-			result: null,
-			error: e instanceof Error ? e.message : 'Fetch failed',
-		});
+		const msg = e instanceof Error ? e.message : 'Fetch failed';
+		fetchStatus.set({ loading: false, result: null, error: msg });
+		addToast(`Fetch ${symbol} failed: ${msg}`, 'error');
 	}
 }
 

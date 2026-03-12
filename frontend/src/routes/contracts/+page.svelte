@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { type Contract } from '$lib/api';
-	import { contracts, loadContracts, selectedUnderlying } from '$lib/stores';
+	import { contracts, loadContracts, selectedUnderlying, addToast } from '$lib/stores';
+	import { getDte } from '$lib/utils';
 	import { onMount } from 'svelte';
 
 	type SortKey = keyof Contract | 'dte';
@@ -10,22 +11,20 @@
 	let filterUnderlying = $state('');
 	let filterType = $state('');
 
-	onMount(() => {
-		loadContracts();
-	});
-
-	// Reload contracts when global symbol changes
-	$effect(() => {
-		const sym = $selectedUnderlying;
-		if (sym) {
-			loadContracts({ underlying: sym });
+	onMount(async () => {
+		try {
+			await loadContracts();
+		} catch (e) {
+			addToast('Failed to load contracts', 'error');
 		}
 	});
 
-	function getDte(expiry: string): number {
-		const diff = new Date(expiry + 'T00:00:00').getTime() - new Date().getTime();
-		return Math.max(0, Math.ceil(diff / 86400000));
-	}
+	$effect(() => {
+		const sym = $selectedUnderlying;
+		if (sym) {
+			loadContracts({ underlying: sym }).catch(() => addToast('Failed to load contracts', 'error'));
+		}
+	});
 
 	function toggleSort(key: SortKey) {
 		if (sortKey === key) {
@@ -78,32 +77,32 @@
 	</header>
 
 	<div class="controls">
-		<input type="text" placeholder="Search symbol..." bind:value={search} class="search" title="Filter contracts by symbol name" />
-		<select bind:value={filterUnderlying} title="Filter by underlying asset (e.g. BTC, ETH)">
+		<input type="text" placeholder="Search symbol..." bind:value={search} class="search" />
+		<select bind:value={filterUnderlying}>
 			<option value="">All Underlyings</option>
 			{#each underlyings as u}
 				<option value={u}>{u}</option>
 			{/each}
 		</select>
-		<select bind:value={filterType} title="Filter by option type — Calls (right to buy) or Puts (right to sell)">
+		<select bind:value={filterType}>
 			<option value="">Call + Put</option>
 			<option value="C">Calls</option>
 			<option value="P">Puts</option>
 		</select>
-		<span class="count" title="Number of contracts shown after filters / total contracts">{filtered.length} of {$contracts.total}</span>
+		<span class="count">{filtered.length} of {$contracts.total}</span>
 	</div>
 
 	<div class="table-wrapper">
 		<table>
 			<thead>
 				<tr>
-					<th class="sortable" onclick={() => toggleSort('symbol')} title="Option contract ticker. Click to sort.">Symbol{sortIndicator('symbol')}</th>
-					<th class="sortable" onclick={() => toggleSort('underlying')} title="The base asset. Click to sort.">Underlying{sortIndicator('underlying')}</th>
-					<th class="sortable num" onclick={() => toggleSort('strike')} title="Strike price in USD. Click to sort.">Strike{sortIndicator('strike')}</th>
-					<th class="sortable" onclick={() => toggleSort('expiry')} title="Expiration date. Click to sort.">Expiry{sortIndicator('expiry')}</th>
-					<th class="sortable num" onclick={() => toggleSort('dte')} title="Days to expiry. Click to sort.">DTE{sortIndicator('dte')}</th>
-					<th class="sortable" onclick={() => toggleSort('option_type')} title="C = Call, P = Put. Click to sort.">Type{sortIndicator('option_type')}</th>
-					<th title="Data source exchange">Source</th>
+					<th class="sortable" onclick={() => toggleSort('symbol')}>Symbol{sortIndicator('symbol')}</th>
+					<th class="sortable" onclick={() => toggleSort('underlying')}>Underlying{sortIndicator('underlying')}</th>
+					<th class="sortable num" onclick={() => toggleSort('strike')}>Strike{sortIndicator('strike')}</th>
+					<th class="sortable" onclick={() => toggleSort('expiry')}>Expiry{sortIndicator('expiry')}</th>
+					<th class="sortable num" onclick={() => toggleSort('dte')}>DTE{sortIndicator('dte')}</th>
+					<th class="sortable" onclick={() => toggleSort('option_type')}>Type{sortIndicator('option_type')}</th>
+					<th>Source</th>
 				</tr>
 			</thead>
 			<tbody>
@@ -148,15 +147,15 @@
 	.search { width: 180px; }
 
 	.count {
-		color: #8b949e;
+		color: var(--text-secondary);
 		font-size: 0.8rem;
 		margin-left: auto;
 	}
 
 	input, select {
-		background: #21262d;
-		color: #c9d1d9;
-		border: 1px solid #30363d;
+		background: var(--bg-input);
+		color: var(--text);
+		border: 1px solid var(--border);
 		padding: 0.4rem 0.6rem;
 		border-radius: 6px;
 		font-size: 0.8rem;
@@ -173,8 +172,8 @@
 	th {
 		text-align: left;
 		padding: 0.5rem 0.75rem;
-		border-bottom: 2px solid #30363d;
-		color: #8b949e;
+		border-bottom: 2px solid var(--border);
+		color: var(--text-secondary);
 		font-weight: 600;
 		font-size: 0.75rem;
 		text-transform: uppercase;
@@ -188,16 +187,16 @@
 	}
 
 	th.sortable:hover {
-		color: #c9d1d9;
+		color: var(--text);
 	}
 
 	td {
 		padding: 0.4rem 0.75rem;
-		border-bottom: 1px solid #21262d;
+		border-bottom: 1px solid var(--border-light);
 	}
 
 	tr:hover {
-		background: #161b22;
+		background: var(--hover-bg);
 	}
 
 	.mono {
@@ -211,11 +210,11 @@
 	}
 
 	.source {
-		color: #8b949e;
+		color: var(--text-secondary);
 	}
 
-	.dte-urgent { color: #f85149; font-weight: 600; }
-	.dte-warn { color: #f0883e; }
+	.dte-urgent { color: var(--red); font-weight: 600; }
+	.dte-warn { color: var(--orange); }
 
-	.empty { text-align: center; color: #8b949e; padding: 2rem; }
+	.empty { text-align: center; color: var(--text-secondary); padding: 2rem; }
 </style>

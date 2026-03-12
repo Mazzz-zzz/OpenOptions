@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { api, type FetchedUnderlying } from '$lib/api';
+	import { addToast } from '$lib/stores';
+	import { timeAgo } from '$lib/utils';
 	import { onMount } from 'svelte';
 
 	let {
@@ -22,12 +24,18 @@
 		try {
 			const res = await api.getUnderlyings();
 			fetched = res.data;
-		} catch {}
+		} catch (e) {
+			addToast('Failed to load symbols list', 'error');
+		}
 	});
 
 	const POPULAR = [
 		{ label: 'BTC', group: 'Crypto' },
 		{ label: 'ETH', group: 'Crypto' },
+		{ label: '/ES', group: 'Futures' },
+		{ label: '/NQ', group: 'Futures' },
+		{ label: '/CL', group: 'Futures' },
+		{ label: '/GC', group: 'Futures' },
 		{ label: 'SPY', group: 'Index ETF' },
 		{ label: 'QQQ', group: 'Index ETF' },
 		{ label: 'IWM', group: 'Index ETF' },
@@ -69,23 +77,12 @@
 			inputEl?.blur();
 		}
 	}
-
-	function timeAgo(iso: string): string {
-		const diff = Date.now() - new Date(iso).getTime();
-		const mins = Math.floor(diff / 60000);
-		if (mins < 1) return 'just now';
-		if (mins < 60) return `${mins}m ago`;
-		const hrs = Math.floor(mins / 60);
-		if (hrs < 24) return `${hrs}h ago`;
-		const days = Math.floor(hrs / 24);
-		return `${days}d ago`;
-	}
 </script>
 
 <div class="search-wrapper">
 	<div class="search-input" class:focused>
-		<svg class="search-icon" viewBox="0 0 16 16" width="14" height="14">
-			<path fill="#8b949e" d="M10.68 11.74a6 6 0 0 1-7.92-8.98 6 6 0 0 1 8.98 7.92l3.81 3.81a.75.75 0 0 1-1.06 1.06l-3.81-3.81zM6 10.5a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9z"/>
+		<svg class="search-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+			<path fill="var(--text-muted, #8b949e)" d="M10.68 11.74a6 6 0 0 1-7.92-8.98 6 6 0 0 1 8.98 7.92l3.81 3.81a.75.75 0 0 1-1.06 1.06l-3.81-3.81zM6 10.5a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9z"/>
 		</svg>
 		<input
 			bind:this={inputEl}
@@ -99,9 +96,9 @@
 			autocomplete="off"
 		/>
 		{#if value}
-			<button class="clear" onclick={() => { value = ''; inputEl?.focus(); }} title="Clear">
-				<svg viewBox="0 0 16 16" width="12" height="12">
-					<path fill="#8b949e" d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06z"/>
+			<button class="clear" onclick={() => { value = ''; inputEl?.focus(); }} title="Clear" aria-label="Clear search">
+				<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+					<path fill="var(--text-muted, #8b949e)" d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06z"/>
 				</svg>
 			</button>
 		{/if}
@@ -128,7 +125,7 @@
 				{/each}
 			{/if}
 
-			{#each ['Crypto', 'Index ETF', 'Equity'] as group}
+			{#each ['Crypto', 'Futures', 'Index ETF', 'Equity'] as group}
 				{@const items = filtered.filter(s => s.group === group && !fetchedSymbols.has(s.label))}
 				{#if items.length > 0}
 					<div class="group-label">{group}</div>
@@ -165,15 +162,16 @@
 		display: flex;
 		align-items: center;
 		gap: 0.4rem;
-		background: #21262d;
-		border: 1px solid #30363d;
+		background: var(--bg-input);
+		border: 1px solid var(--border);
 		border-radius: 6px;
 		padding: 0 0.6rem;
 		transition: border-color 0.15s;
 	}
 
 	.search-input.focused {
-		border-color: #58a6ff;
+		border-color: var(--blue);
+		box-shadow: 0 0 0 3px rgba(9, 105, 218, 0.12);
 	}
 
 	.search-icon {
@@ -184,7 +182,7 @@
 		background: transparent;
 		border: none;
 		outline: none;
-		color: #e1e4e8;
+		color: var(--text);
 		font-size: 0.875rem;
 		padding: 0.5rem 0;
 		width: 140px;
@@ -192,7 +190,7 @@
 	}
 
 	input::placeholder {
-		color: #484f58;
+		color: var(--text-muted);
 	}
 
 	input:disabled {
@@ -216,12 +214,12 @@
 		top: calc(100% + 4px);
 		left: 0;
 		width: 220px;
-		background: #1c2128;
-		border: 1px solid #30363d;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
 		border-radius: 8px;
 		padding: 0.25rem 0;
 		z-index: 100;
-		box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+		box-shadow: var(--shadow-md);
 		max-height: 360px;
 		overflow-y: auto;
 	}
@@ -230,7 +228,7 @@
 		font-size: 0.65rem;
 		text-transform: uppercase;
 		letter-spacing: 0.06em;
-		color: #484f58;
+		color: var(--text-muted);
 		padding: 0.4rem 0.75rem 0.15rem;
 		font-weight: 600;
 	}
@@ -241,7 +239,7 @@
 		text-align: left;
 		background: none;
 		border: none;
-		color: #c9d1d9;
+		color: var(--text);
 		padding: 0.35rem 0.75rem;
 		font-size: 0.8rem;
 		cursor: pointer;
@@ -249,20 +247,20 @@
 	}
 
 	.dropdown-item:hover {
-		background: #30363d;
+		background: var(--hover-bg);
 	}
 
 	.dropdown-item.active {
-		color: #58a6ff;
+		color: var(--blue);
 		font-weight: 600;
 	}
 
 	.dropdown-item.custom {
-		color: #8b949e;
+		color: var(--text-secondary);
 	}
 
 	.dropdown-item.custom strong {
-		color: #58a6ff;
+		color: var(--blue);
 	}
 
 	.fetched-item {
@@ -277,6 +275,6 @@
 
 	.fetched-item .meta {
 		font-size: 0.65rem;
-		color: #484f58;
+		color: var(--text-muted);
 	}
 </style>

@@ -239,5 +239,144 @@ class TastytradeClient:
             if item.get("occurred-date")
         ]
 
+    async def fetch_futures_chain(self, product_code: str) -> list[OptionQuote]:
+        """Fetch options on futures for a product code (e.g. 'ES', 'NQ', 'CL').
+
+        Uses /futures-option-chains/{product_code}/nested for chain data
+        and /market-data/by-type?future-option=... for quotes.
+        """
+        await self._ensure_token()
+
+        # Get underlying futures price
+        futures_price = await self._get_futures_price(product_code)
+
+        # Get futures option chain
+        all_options = await self._get_futures_option_chain(product_code)
+
+        # Filter expired
+        options = []
+        for opt in all_options:
+            exp_str = opt.get("expiration-date", "")
+            if not exp_str:
+                continue
+            exp = datetime.strptime(exp_str, "%Y-%m-%d").date()
+            if exp <= date.today():
+                continue
+            options.append(opt)
+
+        if not options:
+            return []
+
+        symbols = [opt["symbol"] for opt in options]
+        market_data = await self._get_futures_market_data_batched(symbols)
+
+        quotes = []
+        for opt in options:
+            sym = opt["symbol"]
+            md = market_data.get(sym)
+            if md is None:
+                continue
+
+            bid = float(md.get("bid") or 0)
+            ask = float(md.get("ask") or 0)
+            if bid <= 0 and ask <= 0:
+                continue
+
+            mid_val = (bid + ask) / 2
+            strike = float(opt["strike-price"])
+            expiry = datetime.strptime(opt["expiration-date"], "%Y-%m-%d").date()
+            option_type = opt.get("option-type", "C")
+
+            market_iv = float(md.get("volatility") or 0)
+
+            quotes.append(OptionQuote(
+                symbol=sym,
+                underlying=f"/{product_code.upper()}",
+                strike=strike,
+                expiry=expiry,
+                option_type=option_type,
+                bid=bid,
+                ask=ask,
+                mid=mid_val,
+                market_iv=market_iv,
+                underlying_price=futures_price,
+            ))
+
+        return quotes
+
+    async def _get_futures_price(self, product_code: str) -> float:
+        """Get current futures price for the front-month contract."""
+        resp = await self._http.get(
+            "/instruments/futures",
+            params={"product-codes[]": product_code.upper()},
+        )
+        resp.raise_for_status()
+        items = resp.json().get("data", {}).get("items", [])
+        if not items:
+            raise ValueError(f"No futures instruments for {product_code}")
+
+        # Find the front-month active contract
+        active = [i for i in items if i.get("is-closing-only") is not True]
+        if not active:
+            active = items
+
+        # Get market data for the front-month futures contract
+        front = active[0]
+        front_symbol = front["symbol"]
+        md_resp = await self._http.get(
+            "/market-data/by-type",
+            params={"future": front_symbol},
+        )
+        md_resp.raise_for_status()
+        md_items = md_resp.json().get("data", {}).get("items", [])
+        if not md_items:
+            raise ValueError(f"No market data for futures {front_symbol}")
+        item = md_items[0]
+        return float(item.get("last") or item.get("mark") or item.get("prev-close") or 0)
+
+    async def _get_futures_option_chain(self, product_code: str) -> list[dict]:
+        """Get all active futures options for the product code."""
+        resp = await self._http.get(
+            f"/futures-option-chains/{product_code.upper()}/nested",
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        # Nested response: futures -> expirations -> strikes -> options
+        options = []
+        for future in data.get("data", {}).get("futures", []):
+            for exp_group in future.get("option-expirations", []):
+                for strike_group in exp_group.get("strikes", []):
+                    for opt in [strike_group.get("call"), strike_group.get("put")]:
+                        if opt and opt.get("active", True):
+                            options.append(opt)
+        return options
+
+    async def _get_futures_market_data_batched(self, symbols: list[str]) -> dict[str, dict]:
+        """Get bid/ask/IV for futures option symbols in parallel batches."""
+        result = {}
+        sem = asyncio.Semaphore(MAX_CONCURRENT)
+
+        async def fetch_batch(batch):
+            async with sem:
+                resp = await self._http.get(
+                    "/market-data/by-type",
+                    params={"future-option": ",".join(batch)},
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    for item in data.get("data", {}).get("items", []):
+                        result[item["symbol"]] = item
+                else:
+                    logger.warning(f"Futures market data batch failed: {resp.status_code}")
+
+        tasks = []
+        for i in range(0, len(symbols), BATCH_SIZE):
+            batch = symbols[i:i + BATCH_SIZE]
+            tasks.append(fetch_batch(batch))
+
+        await asyncio.gather(*tasks)
+        return result
+
     async def close(self):
         await self._http.aclose()

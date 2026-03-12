@@ -1,17 +1,16 @@
 <script lang="ts">
 	import SymbolSearch from '$lib/components/SymbolSearch.svelte';
+	import Toast from '$lib/components/Toast.svelte';
 	import { selectedUnderlying, fetchStatus, selectUnderlying, fetchUnderlying } from '$lib/stores';
 
 	let { children } = $props();
 	let symbol = $state('');
 
-	/** Selecting from dropdown/enter = load existing DB data */
 	function handleSelect() {
 		if (!symbol) return;
 		selectUnderlying(symbol);
 	}
 
-	/** Fetch button = hit exchange API for fresh data */
 	function handleFetch() {
 		if (!symbol) return;
 		fetchUnderlying(symbol);
@@ -22,10 +21,10 @@
 	<nav>
 		<div class="nav-brand" title="OpenOptions — Options mispricing detection platform">OpenOptions</div>
 		<div class="nav-links">
-			<a href="/" title="Mispricing alerts — options where market IV deviates from the model, sorted by net edge">Dashboard</a>
-			<a href="/surface" title="3D volatility surface — visualize market vs model IV across strikes and expiries">Vol Surface</a>
-			<a href="/iv-crush" title="Volatility analysis — term structure, skew, smile, straddle pricing, mispricing by expiry">Vol Analysis</a>
-			<a href="/contracts" title="Browse all option contracts — filter and sort">Contracts</a>
+			<a href="/" title="Mispricing alerts">Dashboard</a>
+			<a href="/surface" title="3D volatility surface">Vol Surface</a>
+			<a href="/iv-crush" title="Volatility analysis">Vol Analysis</a>
+			<a href="/contracts" title="Browse option contracts">Contracts</a>
 		</div>
 		<div class="nav-fetch">
 			<SymbolSearch bind:value={symbol} onsubmit={handleSelect} placeholder="Select symbol..." loading={$fetchStatus.loading} />
@@ -49,12 +48,40 @@
 	</main>
 </div>
 
+<Toast />
+
 <style>
+	:global(:root) {
+		--bg-page: #f6f8fa;
+		--bg-card: #ffffff;
+		--bg-input: #f6f8fa;
+		--bg-nav: #ffffff;
+		--border: #d1d9e0;
+		--border-light: #e1e4e8;
+		--text: #1f2328;
+		--text-secondary: #656d76;
+		--text-muted: #8b949e;
+		--blue: #0969da;
+		--green: #1a7f37;
+		--red: #cf222e;
+		--orange: #bc4c00;
+		--purple: #8250df;
+		--yellow: #9a6700;
+		--hover-bg: #f0f2f5;
+		--badge-blue: rgba(9, 105, 218, 0.08);
+		--badge-green: rgba(26, 127, 55, 0.08);
+		--badge-orange: rgba(188, 76, 0, 0.08);
+		--badge-red: rgba(207, 34, 46, 0.08);
+		--badge-muted: rgba(101, 109, 118, 0.08);
+		--shadow-sm: 0 1px 2px rgba(0,0,0,0.06);
+		--shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+	}
+
 	:global(body) {
 		margin: 0;
 		font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-		background: #0f1117;
-		color: #e1e4e8;
+		background: var(--bg-page);
+		color: var(--text);
 	}
 
 	.app {
@@ -66,14 +93,15 @@
 		align-items: center;
 		gap: 2rem;
 		padding: 0.75rem 1.5rem;
-		background: #161b22;
-		border-bottom: 1px solid #30363d;
+		background: var(--bg-nav);
+		border-bottom: 1px solid var(--border);
+		box-shadow: var(--shadow-sm);
 	}
 
 	.nav-brand {
 		font-size: 1.25rem;
 		font-weight: 700;
-		color: #58a6ff;
+		color: var(--blue);
 	}
 
 	.nav-links {
@@ -82,7 +110,7 @@
 	}
 
 	.nav-links a {
-		color: #8b949e;
+		color: var(--text-secondary);
 		text-decoration: none;
 		padding: 0.25rem 0.5rem;
 		border-radius: 4px;
@@ -90,7 +118,7 @@
 	}
 
 	.nav-links a:hover {
-		color: #e1e4e8;
+		color: var(--text);
 	}
 
 	.nav-fetch {
@@ -101,8 +129,8 @@
 	}
 
 	.active-symbol {
-		background: #388bfd26;
-		color: #58a6ff;
+		background: var(--badge-blue);
+		color: var(--blue);
 		padding: 0.35rem 0.6rem;
 		border-radius: 6px;
 		font-weight: 600;
@@ -110,7 +138,7 @@
 	}
 
 	.fetch-btn {
-		background: #238636;
+		background: #2da44e;
 		color: white;
 		border: none;
 		padding: 0.5rem 1rem;
@@ -122,11 +150,11 @@
 		white-space: nowrap;
 	}
 
-	.fetch-btn:hover:not(:disabled) { background: #2ea043; }
+	.fetch-btn:hover:not(:disabled) { background: var(--green); }
 	.fetch-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
-	.fetch-result { font-size: 0.75rem; color: #8b949e; white-space: nowrap; }
-	.fetch-error { font-size: 0.75rem; color: #f85149; white-space: nowrap; }
+	.fetch-result { font-size: 0.75rem; color: var(--text-secondary); white-space: nowrap; }
+	.fetch-error { font-size: 0.75rem; color: var(--red); white-space: nowrap; }
 
 	main {
 		max-width: 1200px;

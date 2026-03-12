@@ -1,6 +1,6 @@
 <script lang="ts">
 	import VolSurface from '$lib/components/VolSurface.svelte';
-	import { surface, loadSurface, selectedUnderlying } from '$lib/stores';
+	import { surface, loadSurface, selectedUnderlying, addToast } from '$lib/stores';
 
 	let selectedType = $state('C');
 	let loading = $state(false);
@@ -13,13 +13,14 @@
 		try {
 			await loadSurface(underlying, selectedType || undefined);
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to load surface';
+			const msg = e instanceof Error ? e.message : 'Failed to load surface';
+			error = msg;
+			addToast(msg, 'error');
 		} finally {
 			loading = false;
 		}
 	}
 
-	// React to global symbol changes
 	$effect(() => {
 		const sym = $selectedUnderlying;
 		if (sym) load(sym);
@@ -28,14 +29,14 @@
 
 <div class="surface-page">
 	<header>
-		<h1 title="3D visualization of implied volatility across strikes and expiries — highlights where market IV diverges from the fitted model">Volatility Surface</h1>
+		<h1>Volatility Surface</h1>
 		<div class="controls">
 			{#if $selectedUnderlying}
 				<span class="current-symbol">{$selectedUnderlying}</span>
 			{:else}
 				<span class="hint">Fetch a symbol from the navbar</span>
 			{/if}
-			<div class="type-toggle" title="View calls or puts separately — mixing them creates overlapping surfaces with different skew profiles">
+			<div class="type-toggle">
 				<button class:active={selectedType === 'C'} onclick={() => { selectedType = 'C'; if ($selectedUnderlying) load($selectedUnderlying); }}>Calls</button>
 				<button class:active={selectedType === 'P'} onclick={() => { selectedType = 'P'; if ($selectedUnderlying) load($selectedUnderlying); }}>Puts</button>
 				<button class:active={selectedType === ''} onclick={() => { selectedType = ''; if ($selectedUnderlying) load($selectedUnderlying); }}>Both</button>
@@ -77,8 +78,8 @@
 	}
 
 	.current-symbol {
-		background: #388bfd26;
-		color: #58a6ff;
+		background: var(--badge-blue);
+		color: var(--blue);
 		padding: 0.35rem 0.75rem;
 		border-radius: 6px;
 		font-weight: 600;
@@ -86,27 +87,27 @@
 	}
 
 	.hint {
-		color: #484f58;
+		color: var(--text-muted);
 		font-size: 0.8rem;
 	}
 
 	.loading {
-		color: #8b949e;
+		color: var(--text-secondary);
 		font-size: 0.8rem;
 	}
 
 	.type-toggle {
 		display: flex;
-		border: 1px solid #30363d;
+		border: 1px solid var(--border);
 		border-radius: 6px;
 		overflow: hidden;
 	}
 
 	.type-toggle button {
-		background: #21262d;
-		color: #8b949e;
+		background: var(--bg-input);
+		color: var(--text-secondary);
 		border: none;
-		border-right: 1px solid #30363d;
+		border-right: 1px solid var(--border);
 		padding: 0.5rem 0.75rem;
 		font-size: 0.8rem;
 		cursor: pointer;
@@ -118,14 +119,14 @@
 	}
 
 	.type-toggle button.active {
-		background: #388bfd26;
-		color: #58a6ff;
+		background: var(--badge-blue);
+		color: var(--blue);
 	}
 
 	.type-toggle button:hover:not(.active) {
-		color: #c9d1d9;
+		color: var(--text);
 	}
 
-	.error { color: #f85149; }
-	.placeholder { color: #8b949e; text-align: center; padding: 3rem; }
+	.error { color: var(--red); }
+	.placeholder { color: var(--text-secondary); text-align: center; padding: 3rem; }
 </style>

@@ -173,12 +173,49 @@ export interface IvAnalysisData {
 	skew_by_expiry: SkewByExpiry[];
 	smile: SmilePoint[];
 	straddles: StraddleData[];
+	forwards: ForwardData[];
+	opportunities: OpportunityData[];
 	put_call_summary: PutCallSummary | null;
 	iv_rank: IvRankData | null;
 	historical_iv: { ts: string; iv: number }[];
 	market_metrics: MarketMetrics | null;
 	earnings: EarningEvent[];
 	dividends: DividendEvent[];
+}
+
+export interface ForwardData {
+	expiry: string;
+	dte: number;
+	forward_price: number;
+	implied_yield: number | null;
+	basis: number;
+	basis_pct: number | null;
+	pairs: ForwardPair[];
+}
+
+export interface ForwardPair {
+	strike: number;
+	call_mid: number;
+	put_mid: number;
+	synthetic_forward: number;
+	violation_pct: number;
+}
+
+export interface OpportunityData {
+	symbol: string;
+	underlying: string;
+	strike: number;
+	expiry: string;
+	dte: number;
+	option_type: string;
+	market_iv: number | null;
+	model_iv: number | null;
+	deviation: number;
+	net_edge: number;
+	vega: number | null;
+	delta: number | null;
+	bid: number | null;
+	ask: number | null;
 }
 
 export interface MarketMetrics {
