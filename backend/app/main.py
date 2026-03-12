@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import get_settings
-from app.routers import alerts, contracts, fetch, iv_analysis, surface, underlyings
+from app.routers import alerts, contracts, fetch, iv_analysis, ml, surface, underlyings
 
 settings = get_settings()
 
@@ -45,6 +45,7 @@ app.include_router(contracts.router, prefix="/api", tags=["contracts"])
 app.include_router(surface.router, prefix="/api", tags=["surface"])
 app.include_router(iv_analysis.router, prefix="/api", tags=["iv-analysis"])
 app.include_router(underlyings.router, prefix="/api", tags=["underlyings"])
+app.include_router(ml.router, prefix="/api", tags=["ml"])
 
 
 @app.get("/health")

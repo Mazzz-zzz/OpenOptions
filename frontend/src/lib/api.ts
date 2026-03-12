@@ -69,6 +69,47 @@ export const api = {
 	getIvAnalysis(underlying: string, lookbackDays = 30) {
 		return request<IvAnalysisData>('GET', `/iv-analysis/${underlying}?lookback_days=${lookbackDays}`);
 	},
+
+	// ML / Numerai
+	getMlOverview() {
+		return request<MlOverview>('GET', '/ml/overview');
+	},
+
+	getMlExperiments(params?: { cursor?: number; limit?: number }) {
+		const query = new URLSearchParams();
+		if (params?.cursor) query.set('cursor', String(params.cursor));
+		if (params?.limit) query.set('limit', String(params.limit));
+		const qs = query.toString();
+		return request<{ data: MlExperimentData[]; next_cursor: number | null }>('GET', `/ml/experiments${qs ? `?${qs}` : ''}`);
+	},
+
+	getMlRuns(experimentId: number) {
+		return request<{ data: MlRunData[] }>('GET', `/ml/experiments/${experimentId}/runs`);
+	},
+
+	getMlRunMetrics(runId: number) {
+		return request<{ data: MlEpochMetric[] }>('GET', `/ml/runs/${runId}/metrics`);
+	},
+
+	getMlModels() {
+		return request<{ data: MlModelData[] }>('GET', '/ml/models');
+	},
+
+	createMlModel(body: { name: string; model_type: string; run_id?: number; correlation?: number; sharpe?: number }) {
+		return request<MlModelData>('POST', '/ml/models', body);
+	},
+
+	updateMlModel(id: number, body: { stage?: string }) {
+		return request<MlModelData>('PATCH', `/ml/models/${id}`, body);
+	},
+
+	getMlRounds(limit = 50) {
+		return request<{ data: MlRoundData[] }>('GET', `/ml/rounds?limit=${limit}`);
+	},
+
+	getMlEnsemble() {
+		return request<{ data: MlEnsembleData | null }>('GET', '/ml/ensemble');
+	},
 };
 
 // Types
@@ -316,4 +357,95 @@ export interface IvRankData {
 	low: number | null;
 	lookback_days: number;
 	data_points: number;
+}
+
+// ── ML / Numerai types ──────────────────────────────────────────────
+
+export interface MlOverview {
+	active_runs: number;
+	best_model: { name: string; correlation: number | null; sharpe: number | null } | null;
+	latest_round: { round_number: number; status: string; live_corr: number | null } | null;
+	ensemble_score: number | null;
+	recent_runs: MlRecentRun[];
+}
+
+export interface MlRecentRun {
+	id: number;
+	model_type: string;
+	status: string;
+	correlation: number | null;
+	sharpe: number | null;
+	started_at: string;
+	finished_at: string;
+}
+
+export interface MlExperimentData {
+	id: number;
+	name: string;
+	description: string | null;
+	status: string;
+	created_at: string;
+	run_count: number;
+	best_corr: number | null;
+}
+
+export interface MlRunData {
+	id: number;
+	experiment_id: number;
+	model_type: string;
+	status: string;
+	hyperparams_json: string | null;
+	correlation: number | null;
+	sharpe: number | null;
+	feature_exposure: number | null;
+	max_drawdown: number | null;
+	progress_pct: number | null;
+	current_epoch: number | null;
+	total_epochs: number | null;
+	started_at: string | null;
+	finished_at: string | null;
+	created_at: string;
+}
+
+export interface MlEpochMetric {
+	epoch: number;
+	train_loss: number | null;
+	val_loss: number | null;
+	correlation: number | null;
+	sharpe: number | null;
+}
+
+export interface MlModelData {
+	id: number;
+	name: string;
+	model_type: string;
+	stage: string;
+	version: number;
+	run_id: number | null;
+	correlation: number | null;
+	sharpe: number | null;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface MlRoundData {
+	id: number;
+	round_number: number;
+	model_name: string;
+	live_corr: number | null;
+	resolved_corr: number | null;
+	payout_nmr: number | null;
+	status: string;
+	submitted_at: string | null;
+	created_at: string;
+}
+
+export interface MlEnsembleData {
+	id: number;
+	method: string;
+	config_json: string | null;
+	correlation: number | null;
+	sharpe: number | null;
+	is_active: boolean;
+	created_at: string;
 }

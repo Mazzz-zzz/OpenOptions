@@ -135,3 +135,119 @@ class Alert(Base):
     __table_args__ = (
         Index("ix_alerts_dismissed_created", "dismissed", "created_at"),
     )
+
+
+# ── ML / Numerai models ──────────────────────────────────────────────
+
+
+class MlExperiment(Base):
+    __tablename__ = "ml_experiments"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(120), unique=True, nullable=False)
+    description = Column(String(500))
+    status = Column(String(20), nullable=False, default="active")  # active, archived
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    runs = relationship("MlRun", back_populates="experiment", cascade="all, delete-orphan")
+
+
+class MlRun(Base):
+    __tablename__ = "ml_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    experiment_id = Column(Integer, ForeignKey("ml_experiments.id", ondelete="CASCADE"), nullable=False)
+    model_type = Column(String(30), nullable=False)  # lgbm, tabnet, ensemble
+    status = Column(String(20), nullable=False, default="pending")  # pending, running, completed, failed
+    hyperparams_json = Column(String(4000))
+    correlation = Column(Numeric(10, 6))
+    sharpe = Column(Numeric(10, 6))
+    feature_exposure = Column(Numeric(10, 6))
+    max_drawdown = Column(Numeric(10, 6))
+    progress_pct = Column(Numeric(5, 2), default=0)
+    current_epoch = Column(Integer, default=0)
+    total_epochs = Column(Integer, default=0)
+    started_at = Column(DateTime(timezone=True))
+    finished_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    experiment = relationship("MlExperiment", back_populates="runs")
+    epoch_metrics = relationship("MlEpochMetric", back_populates="run", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("ix_ml_runs_experiment_status", "experiment_id", "status"),
+    )
+
+
+class MlEpochMetric(Base):
+    __tablename__ = "ml_epoch_metrics"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(Integer, ForeignKey("ml_runs.id", ondelete="CASCADE"), nullable=False)
+    epoch = Column(Integer, nullable=False)
+    train_loss = Column(Numeric(10, 6))
+    val_loss = Column(Numeric(10, 6))
+    correlation = Column(Numeric(10, 6))
+    sharpe = Column(Numeric(10, 6))
+
+    run = relationship("MlRun", back_populates="epoch_metrics")
+
+    __table_args__ = (
+        Index("ix_ml_epoch_metrics_run_epoch", "run_id", "epoch", unique=True),
+    )
+
+
+class MlModel(Base):
+    __tablename__ = "ml_models"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(120), unique=True, nullable=False)
+    model_type = Column(String(30), nullable=False)
+    stage = Column(String(20), nullable=False, default="dev")  # dev, staging, prod
+    version = Column(Integer, nullable=False, default=1)
+    run_id = Column(Integer, ForeignKey("ml_runs.id", ondelete="SET NULL"))
+    correlation = Column(Numeric(10, 6))
+    sharpe = Column(Numeric(10, 6))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    run = relationship("MlRun")
+
+    __table_args__ = (
+        Index("ix_ml_models_stage", "stage"),
+    )
+
+
+class MlRound(Base):
+    __tablename__ = "ml_rounds"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    round_number = Column(Integer, nullable=False)
+    model_name = Column(String(120), nullable=False)
+    live_corr = Column(Numeric(10, 6))
+    resolved_corr = Column(Numeric(10, 6))
+    payout_nmr = Column(Numeric(10, 6))
+    status = Column(String(20), nullable=False, default="pending")  # pending, resolved
+    submitted_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_ml_rounds_round_model", "round_number", "model_name", unique=True),
+    )
+
+
+class MlEnsemble(Base):
+    __tablename__ = "ml_ensembles"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    method = Column(String(30), nullable=False)  # rank_average, weighted_blend
+    config_json = Column(String(4000))
+    correlation = Column(Numeric(10, 6))
+    sharpe = Column(Numeric(10, 6))
+    is_active = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_ml_ensembles_active", "is_active"),
+    )

@@ -1,0 +1,43 @@
+# Numerai v5 feature group definitions
+# Groups allow selective feature engineering and ablation studies
+
+groups:
+  intelligence:
+    description: "Intelligence features (sentiment, analyst ratings)"
+    prefix: "feature_intelligence"
+
+  wisdom:
+    description: "Wisdom of crowds features"
+    prefix: "feature_wisdom"
+
+  charisma:
+    description: "Charisma features (momentum, flow)"
+    prefix: "feature_charisma"
+
+  strength:
+    description: "Strength features (fundamentals)"
+    prefix: "feature_strength"
+
+  dexterity:
+    description: "Dexterity features (volatility, technical)"
+    prefix: "feature_dexterity"
+
+  constitution:
+    description: "Constitution features (stability, quality)"
+    prefix: "feature_constitution"
+
+  agility:
+    description: "Agility features (short-term signals)"
+    prefix: "feature_agility"
+
+  serenity:
+    description: "Serenity features (low-vol, defensive)"
+    prefix: "feature_serenity"
+
+# Default groups used for training
+default_groups:
+  - intelligence
+  - charisma
+  - strength
+  - dexterity
+  - constitution

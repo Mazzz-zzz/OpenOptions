@@ -25,6 +25,7 @@
 			<a href="/surface" title="3D volatility surface">Vol Surface</a>
 			<a href="/iv-crush" title="Volatility analysis">Vol Analysis</a>
 			<a href="/contracts" title="Browse option contracts">Contracts</a>
+			<a href="/ml" title="Numerai ML training dashboard">Numerai</a>
 		</div>
 		<div class="nav-fetch">
 			<SymbolSearch bind:value={symbol} onsubmit={handleSelect} placeholder="Select symbol..." loading={$fetchStatus.loading} />
