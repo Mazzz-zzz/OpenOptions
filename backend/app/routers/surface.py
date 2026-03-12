@@ -67,7 +67,7 @@ def _estimate_spot(snapshots: list, contracts: list) -> float:
     return best_strike or 0
 
 
-@router.get("/surface/{underlying}")
+@router.get("/surface/{underlying:path}")
 async def get_surface(
     underlying: str,
     option_type: Optional[str] = Query(default=None, description="C or P, omit for both"),

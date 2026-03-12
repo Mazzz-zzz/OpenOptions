@@ -17,6 +17,11 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 	return res.json();
 }
 
+/** Encode underlying for use in URL path (encodes / in futures symbols like /ES). */
+function encodeSymbol(underlying: string): string {
+	return encodeURIComponent(underlying);
+}
+
 export const api = {
 	// Underlyings
 	getUnderlyings() {
@@ -26,7 +31,7 @@ export const api = {
 	// Fetch
 	fetchChain(underlying: string, force = false) {
 		const qs = force ? '?force=true' : '';
-		return request<{ snapshots: number; alerts_raised: number }>('POST', `/fetch/${underlying}${qs}`);
+		return request<{ snapshots: number; alerts_raised: number }>('POST', `/fetch/${encodeSymbol(underlying)}${qs}`);
 	},
 
 	// Alerts
@@ -57,7 +62,7 @@ export const api = {
 		const query = new URLSearchParams();
 		if (optionType) query.set('option_type', optionType);
 		const qs = query.toString();
-		return request<SurfaceData>('GET', `/surface/${underlying}${qs ? `?${qs}` : ''}`);
+		return request<SurfaceData>('GET', `/surface/${encodeSymbol(underlying)}${qs ? `?${qs}` : ''}`);
 	},
 
 	// Snapshots
@@ -67,7 +72,7 @@ export const api = {
 
 	// IV Analysis
 	getIvAnalysis(underlying: string, lookbackDays = 30) {
-		return request<IvAnalysisData>('GET', `/iv-analysis/${underlying}?lookback_days=${lookbackDays}`);
+		return request<IvAnalysisData>('GET', `/iv-analysis/${encodeSymbol(underlying)}?lookback_days=${lookbackDays}`);
 	},
 
 	// ML / Numerai

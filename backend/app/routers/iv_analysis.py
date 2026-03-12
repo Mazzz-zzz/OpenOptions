@@ -38,7 +38,7 @@ def _find_by_delta(points, target_delta, option_type):
     return best
 
 
-@router.get("/iv-analysis/{underlying}")
+@router.get("/iv-analysis/{underlying:path}")
 async def get_iv_analysis(
     underlying: str,
     lookback_days: int = Query(default=30, le=90),
