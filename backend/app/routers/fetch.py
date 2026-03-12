@@ -30,14 +30,19 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 CRYPTO_UNDERLYINGS = {"BTC", "ETH"}
-# Futures product codes that Tastytrade supports
-FUTURES_PRODUCTS = {"ES", "NQ", "CL", "GC", "SI", "ZB", "ZN", "ZC", "ZS", "NG", "RTY", "YM", "HE", "LE"}
 COOLDOWN_MINUTES = 5
 
 
 def _is_futures(symbol: str) -> bool:
-    """Check if symbol is a futures product (e.g. /ES, /NQ)."""
-    return symbol.startswith("/") and symbol[1:] in FUTURES_PRODUCTS
+    """Check if symbol is a futures product (e.g. /ES, /NQ, /ZW).
+
+    Any symbol starting with / followed by 1-4 alpha chars is treated as futures.
+    Tastytrade's API is the authority on whether the product code is valid.
+    """
+    if not symbol.startswith("/"):
+        return False
+    code = symbol[1:]
+    return 1 <= len(code) <= 4 and code.isalpha()
 
 
 @router.post("/fetch/{underlying:path}")

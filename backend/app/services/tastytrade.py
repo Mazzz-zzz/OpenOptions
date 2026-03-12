@@ -313,7 +313,7 @@ class TastytradeClient:
         resp.raise_for_status()
         items = resp.json().get("data", {}).get("items", [])
         if not items:
-            raise ValueError(f"No futures instruments for {product_code}")
+            raise ValueError(f"No futures instruments for /{product_code} — check the product code is valid on Tastytrade")
 
         # Find the front-month active contract
         active = [i for i in items if i.get("is-closing-only") is not True]
