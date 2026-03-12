@@ -4,6 +4,7 @@
 	import { selectedUnderlying, addToast } from '$lib/stores';
 	import { formatIv, formatPts } from '$lib/utils';
 	import { colors, plotlyLayout, plotlyAxis, plotlyLegend } from '$lib/theme';
+	import Tooltip from '$lib/components/Tooltip.svelte';
 
 	let lookbackDays = $state(30);
 	let loading = $state(false);
@@ -321,11 +322,11 @@
 
 	{#if data && data.term_structure.length > 0}
 		<div class="cards">
-			<div class="card" title="Near-term ATM implied volatility">
-				<div class="card-label">ATM IV</div>
+			<div class="card">
+				<div class="card-label"><Tooltip tip="At-the-money implied volatility for the nearest expiry. This is the market's expected annualised move. The model value (SVI fit) shows theoretical fair IV — a negative vol premium means options are trading cheap vs. the model.">ATM IV</Tooltip></div>
 				<div class="card-value">{formatIv(data.term_structure[0].atm_iv)}</div>
 				{#if data.term_structure[0].atm_model_iv}
-					<div class="card-sub" title="SVI model fair value">
+					<div class="card-sub">
 						Model: {formatIv(data.term_structure[0].atm_model_iv)}
 						{#if data.straddles[0]?.vol_premium !== null && data.straddles[0]?.vol_premium !== undefined}
 							<span class="vol-premium" class:rich={data.straddles[0].vol_premium! > 0} class:cheap={data.straddles[0].vol_premium! < 0}>
@@ -336,8 +337,8 @@
 				{/if}
 			</div>
 
-			<div class="card" title="Nearest expiry ATM straddle as % of spot">
-				<div class="card-label">Implied Move</div>
+			<div class="card">
+				<div class="card-label"><Tooltip tip="The nearest-expiry ATM straddle price as a percentage of spot. This is the market's expected move by expiration. Compare to realised moves to gauge if options are over/under-priced.">Implied Move</Tooltip></div>
 				<div class="card-value" class:high-move={data.straddles[0]?.straddle_pct > 5}>
 					{data.straddles[0] ? data.straddles[0].straddle_pct.toFixed(1) + '%' : '\u2014'}
 				</div>
@@ -346,8 +347,8 @@
 				{/if}
 			</div>
 
-			<div class="card" title="Term structure slope: positive = contango, negative = backwardation">
-				<div class="card-label">Term Structure</div>
+			<div class="card">
+				<div class="card-label"><Tooltip tip="Slope of IV across expirations. Contango (positive slope) means longer-dated options have higher IV — normal for equities. Backwardation (negative slope) signals near-term fear or an event like earnings driving up short-dated IV.">Term Structure</Tooltip></div>
 				<div class="card-value" style="color: {slopeColor(data.ts_slope)}">
 					{slopeLabel(data.ts_slope)}
 				</div>
@@ -358,8 +359,8 @@
 
 			{#if data.skew_by_expiry.length > 0}
 				{@const nearSkew = data.skew_by_expiry[0]}
-				<div class="card" title="25-delta risk reversal on nearest expiry">
-					<div class="card-label">Skew (25&Delta;)</div>
+				<div class="card">
+					<div class="card-label"><Tooltip tip="25-delta risk reversal: the IV difference between 25Δ put and 25Δ call. Positive = put skew (downside protection is pricier, typical for equities). Negative = call skew (upside bets are pricier, common in meme stocks or crypto).">Skew (25&Delta;)</Tooltip></div>
 					<div class="card-value" style="color: {nearSkew.risk_reversal !== null ? (nearSkew.risk_reversal > 0 ? colors.red : colors.green) : colors.textMuted}">
 						{nearSkew.risk_reversal !== null ? formatPts(nearSkew.risk_reversal) : '\u2014'}
 					</div>
@@ -371,8 +372,8 @@
 				</div>
 			{/if}
 
-			<div class="card rank-card" title="IV Rank: where current IV sits relative to its historical range">
-				<div class="card-label">IV Rank / Pctl</div>
+			<div class="card rank-card">
+				<div class="card-label"><Tooltip tip="IV Rank shows where current IV sits in its historical range (0% = at the low, 100% = at the high). IV Percentile is the % of days IV was lower than today. High values suggest options are expensive; low values suggest they're cheap. The IV Index is the exchange-published aggregate IV.">IV Rank / Pctl</Tooltip></div>
 				{#if ivRankDisplay !== null}
 					<div class="card-value" style="color: {rankColor(ivRankDisplay)}">
 						{ivRankDisplay.toFixed(0)}%
@@ -400,8 +401,8 @@
 			</div>
 
 			{#if data.market_metrics?.liquidity_rating !== null && data.market_metrics?.liquidity_rating !== undefined}
-				<div class="card" title="Tastytrade liquidity rating (1-5 stars)">
-					<div class="card-label">Liquidity</div>
+				<div class="card">
+					<div class="card-label"><Tooltip tip="Tastytrade's liquidity rating (1–5 stars) based on bid-ask spreads, open interest, and volume. Higher ratings mean tighter spreads and easier fills. Below 3 stars, slippage can eat into edge significantly.">Liquidity</Tooltip></div>
 					<div class="card-value stars">
 						{'\u2605'.repeat(Math.min(data.market_metrics.liquidity_rating, 5))}{'\u2606'.repeat(Math.max(0, 5 - data.market_metrics.liquidity_rating))}
 					</div>
@@ -409,8 +410,8 @@
 				</div>
 			{/if}
 
-			<div class="card" title="Spot price estimate and chain breadth">
-				<div class="card-label">Spot / Chain</div>
+			<div class="card">
+				<div class="card-label"><Tooltip tip="Current spot price (derived from ATM option prices or market data) and the breadth of the option chain — how many expirations and total contracts are available. More expiries and contracts mean better data for surface fitting.">Spot / Chain</Tooltip></div>
 				<div class="card-value">${data.spot?.toLocaleString() ?? '\u2014'}</div>
 				<div class="card-sub">{data.term_structure.length} expiries, {data.smile.length} contracts</div>
 			</div>
