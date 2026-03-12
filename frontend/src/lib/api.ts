@@ -17,9 +17,14 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 	return res.json();
 }
 
-/** Encode underlying for use in URL path (encodes / in futures symbols like /ES). */
+/** Encode underlying for use in URL path.
+ *  API Gateway decodes %2F to / before passing to Lambda, so we
+ *  double-encode the slash: / → %252F → API GW decodes to %2F → FastAPI decodes to /
+ */
 function encodeSymbol(underlying: string): string {
-	return encodeURIComponent(underlying);
+	return underlying.startsWith('/')
+		? '%2F' + encodeURIComponent(underlying.slice(1))
+		: encodeURIComponent(underlying);
 }
 
 export const api = {
