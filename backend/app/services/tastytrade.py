@@ -311,7 +311,9 @@ class TastytradeClient:
             params={"product-codes[]": product_code.upper()},
         )
         resp.raise_for_status()
-        items = resp.json().get("data", {}).get("items", [])
+        all_items = resp.json().get("data", {}).get("items", [])
+        # API returns all products — filter to matching product code
+        items = [i for i in all_items if i.get("product-code", "").upper() == product_code.upper()]
         if not items:
             raise ValueError(f"No futures instruments for /{product_code} — check the product code is valid on Tastytrade")
 

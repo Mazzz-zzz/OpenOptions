@@ -138,6 +138,11 @@ async def fetch_chain(
         await client.close()
 
     if not chain:
+        if is_futures:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No options available for {underlying}. The futures contract exists but has no listed options on Tastytrade.",
+            )
         raise HTTPException(status_code=404, detail=f"No options data found for {underlying}")
 
     # 2. Get risk-free rate (non-fatal — fallback to 5% if FRED is down)

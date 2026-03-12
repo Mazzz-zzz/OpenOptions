@@ -415,7 +415,7 @@ class TestTastytradeParsing:
         """Empty futures chain should return empty list."""
         token_resp = self._mock_response({"access_token": "tok", "expires_in": 3600})
         instruments_resp = self._mock_response({
-            "data": {"items": [{"symbol": "/ESM6", "is-closing-only": False}]}
+            "data": {"items": [{"symbol": "/ESM6", "is-closing-only": False, "product-code": "ES"}]}
         })
         futures_md_resp = self._mock_response({
             "data": {"items": [{"symbol": "/ESM6", "last": "5500.0"}]}
