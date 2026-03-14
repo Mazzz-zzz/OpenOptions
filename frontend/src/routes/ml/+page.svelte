@@ -72,12 +72,15 @@
 		'ml.c5.xlarge': { rate: 0.235, spec: '4 vCPU, 8 GB' },
 		'ml.c5.2xlarge': { rate: 0.470, spec: '8 vCPU, 16 GB' },
 	};
-	let estimatedCost = $derived(() => {
+	let estimatedCost = $derived.by(() => {
 		const info = instanceRates[deployInstanceType];
 		if (!info) return null;
-		// Rough estimate: ~15 min for small, ~30 min for medium, ~60 min for all
 		const minutes = deployFeatureSet === 'small' ? 15 : deployFeatureSet === 'medium' ? 30 : 60;
-		return { low: (info.rate * minutes / 60).toFixed(2), high: (info.rate * minutes * 1.5 / 60).toFixed(2) };
+		return {
+			low: (info.rate * minutes / 60).toFixed(2),
+			high: (info.rate * minutes * 1.5 / 60).toFixed(2),
+			minutes
+		};
 	});
 
 	async function handleDeploy() {
@@ -411,7 +414,7 @@
 							<span>Instance Type</span>
 							<select bind:value={deployInstanceType}>
 								{#each Object.entries(instanceRates) as [type, info]}
-									<option value={type}>{type} &mdash; ${info.rate}/hr</option>
+									<option value={type}>{type} ({info.spec})</option>
 								{/each}
 							</select>
 						</label>
@@ -454,12 +457,6 @@
 							</label>
 						{/if}
 					</div>
-					<div class="field-grid" style="margin-top: 0.6rem;">
-						<label>
-							<span>Neutralization ({deployNeutralizationPct}%)</span>
-							<input type="range" bind:value={deployNeutralizationPct} min="0" max="100" step="5" />
-						</label>
-					</div>
 				</div>
 
 				<div class="deploy-sidebar">
@@ -467,28 +464,32 @@
 						<h2>Options</h2>
 						<div class="toggle-stack">
 							<label class="toggle-label">
-								<input type="checkbox" bind:checked={deployMultiTarget} />
+								<span class="toggle-switch" class:on={deployMultiTarget}></span>
+								<input type="checkbox" class="sr-only" bind:checked={deployMultiTarget} />
 								<div>
 									<span class="toggle-title">Multi-Target Training</span>
 									<span class="toggle-desc">Train on all 8 targets, ensemble via rank-average</span>
 								</div>
 							</label>
 							<label class="toggle-label">
-								<input type="checkbox" bind:checked={deployEnableEraStats} />
+								<span class="toggle-switch" class:on={deployEnableEraStats}></span>
+								<input type="checkbox" class="sr-only" bind:checked={deployEnableEraStats} />
 								<div>
 									<span class="toggle-title">Era Statistics</span>
 									<span class="toggle-desc">Per-era mean/std of top features</span>
 								</div>
 							</label>
 							<label class="toggle-label">
-								<input type="checkbox" bind:checked={deployEnableGroupAggs} />
+								<span class="toggle-switch" class:on={deployEnableGroupAggs}></span>
+								<input type="checkbox" class="sr-only" bind:checked={deployEnableGroupAggs} />
 								<div>
 									<span class="toggle-title">Group Aggregates</span>
 									<span class="toggle-desc">Feature group means from feature_groups.yaml</span>
 								</div>
 							</label>
 							<label class="toggle-label">
-								<input type="checkbox" bind:checked={deployUpload} />
+								<span class="toggle-switch" class:on={deployUpload}></span>
+								<input type="checkbox" class="sr-only" bind:checked={deployUpload} />
 								<div>
 									<span class="toggle-title">Upload to Numerai</span>
 									<span class="toggle-desc">Auto-submit predictions after training</span>
@@ -497,14 +498,43 @@
 						</div>
 					</div>
 
-					<div class="deploy-section deploy-launch-section">
-						<div class="cost-estimate">
-							{#if estimatedCost()}
-								Estimated: <strong>${estimatedCost()?.low} &ndash; ${estimatedCost()?.high}</strong>
-							{/if}
+					<div class="deploy-section">
+						<h2>Neutralization</h2>
+						<div class="neutralization-control">
+							<div class="neutralization-header">
+								<span class="neutralization-value">{deployNeutralizationPct}%</span>
+							</div>
+							<input type="range" bind:value={deployNeutralizationPct} min="0" max="100" step="5" />
+							<div class="neutralization-labels">
+								<span>None</span>
+								<span>Full</span>
+							</div>
 						</div>
+					</div>
+
+					<div class="deploy-section deploy-launch-section">
+						{#if estimatedCost}
+							<div class="cost-estimate">
+								<div class="cost-row">
+									<span class="cost-label">Est. time</span>
+									<span class="cost-value">~{estimatedCost.minutes} min</span>
+								</div>
+								<div class="cost-row">
+									<span class="cost-label">Est. cost</span>
+									<span class="cost-value cost-highlight">${estimatedCost.low} &ndash; ${estimatedCost.high}</span>
+								</div>
+								<div class="cost-row">
+									<span class="cost-label">Rate</span>
+									<span class="cost-value">${instanceRates[deployInstanceType]?.rate}/hr</span>
+								</div>
+							</div>
+						{/if}
 						<button type="submit" class="launch-btn" disabled={!deployExpName.trim() || deployLoading}>
-							{deployLoading ? 'Launching...' : 'Launch Training'}
+							{#if deployLoading}
+								<span class="launch-spinner"></span> Launching...
+							{:else}
+								Launch Training
+							{/if}
 						</button>
 					</div>
 				</div>
@@ -729,7 +759,12 @@
 		gap: 0;
 		margin-bottom: 1rem;
 		border-bottom: 2px solid var(--border-light);
+		overflow-x: auto;
+		-webkit-overflow-scrolling: touch;
+		scrollbar-width: none;
 	}
+
+	.tabs::-webkit-scrollbar { display: none; }
 
 	.tabs button {
 		background: none;
@@ -742,6 +777,8 @@
 		border-bottom: 2px solid transparent;
 		margin-bottom: -2px;
 		transition: color 0.15s, border-color 0.15s;
+		white-space: nowrap;
+		flex-shrink: 0;
 	}
 
 	.tabs button:hover { color: var(--text); }
@@ -758,7 +795,7 @@
 	}
 
 	.section { margin-bottom: 1.25rem; }
-	.table-wrapper { overflow-x: auto; }
+	.table-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
 	table {
 		width: 100%;
@@ -895,13 +932,7 @@
 		padding: 3rem;
 	}
 
-	@media (max-width: 900px) {
-		.cards { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
-		.field-grid.three-col { grid-template-columns: 1fr 1fr; }
-		.deploy-grid { grid-template-columns: 1fr; }
-	}
-
-	/* Deploy tab */
+	/* ── Deploy tab ── */
 	.deploy-form { width: 100%; }
 
 	.deploy-grid {
@@ -936,7 +967,7 @@
 		margin-top: 1.25rem;
 	}
 
-	.deploy-form label span {
+	.deploy-form label > span:first-child {
 		display: block;
 		font-size: 0.7rem;
 		font-weight: 600;
@@ -958,6 +989,7 @@
 		font-size: 0.82rem;
 		font-family: 'SF Mono', 'Consolas', monospace;
 		transition: border-color 0.15s;
+		min-height: 2.5rem;
 	}
 
 	.deploy-form input[type="range"] {
@@ -981,16 +1013,17 @@
 
 	.field-grid.three-col { grid-template-columns: 1fr 1fr 1fr; }
 
+	/* Toggle switches */
 	.toggle-stack {
 		display: flex;
 		flex-direction: column;
-		gap: 0.25rem;
+		gap: 0.125rem;
 	}
 
 	.toggle-label {
 		display: flex;
 		align-items: flex-start;
-		gap: 0.5rem;
+		gap: 0.65rem;
 		cursor: pointer;
 		padding: 0.5rem;
 		border-radius: 6px;
@@ -999,29 +1032,97 @@
 
 	.toggle-label:hover { background: var(--bg-input); }
 
-	.toggle-label input[type="checkbox"] {
-		width: auto;
-		margin-top: 0.15rem;
-		accent-color: var(--blue);
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border-width: 0;
+	}
+
+	.toggle-switch {
+		position: relative;
+		flex-shrink: 0;
+		width: 2.25rem;
+		height: 1.25rem;
+		background: var(--border);
+		border-radius: 0.625rem;
+		transition: background 0.2s;
+		margin-top: 0.1rem;
+	}
+
+	.toggle-switch::after {
+		content: '';
+		position: absolute;
+		top: 2px;
+		left: 2px;
+		width: 1rem;
+		height: 1rem;
+		background: white;
+		border-radius: 50%;
+		transition: transform 0.2s;
+		box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+	}
+
+	.toggle-switch.on {
+		background: var(--blue);
+	}
+
+	.toggle-switch.on::after {
+		transform: translateX(1rem);
 	}
 
 	.toggle-title {
-		font-size: 0.8rem !important;
-		font-weight: 600 !important;
-		color: var(--text) !important;
-		text-transform: none !important;
-		letter-spacing: normal !important;
+		font-size: 0.8rem;
+		font-weight: 600;
+		color: var(--text);
+		text-transform: none;
+		letter-spacing: normal;
+		display: block;
 	}
 
 	.toggle-desc {
-		font-size: 0.7rem !important;
-		color: var(--text-muted) !important;
-		text-transform: none !important;
-		letter-spacing: normal !important;
-		font-weight: normal !important;
+		font-size: 0.7rem;
+		color: var(--text-muted);
+		text-transform: none;
+		letter-spacing: normal;
+		font-weight: normal;
 		line-height: 1.35;
+		display: block;
 	}
 
+	/* Neutralization */
+	.neutralization-control {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+	}
+
+	.neutralization-header {
+		text-align: center;
+	}
+
+	.neutralization-value {
+		font-size: 1.25rem;
+		font-weight: 700;
+		color: var(--blue);
+		font-variant-numeric: tabular-nums;
+	}
+
+	.neutralization-labels {
+		display: flex;
+		justify-content: space-between;
+		font-size: 0.65rem;
+		color: var(--text-muted);
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+
+	/* Cost estimate */
 	.deploy-launch-section {
 		display: flex;
 		flex-direction: column;
@@ -1030,27 +1131,102 @@
 	}
 
 	.cost-estimate {
-		font-size: 0.8rem;
-		color: var(--text-secondary);
-		text-align: center;
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
 	}
 
-	.cost-estimate strong { color: var(--orange); }
+	.cost-row {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		font-size: 0.78rem;
+	}
 
+	.cost-label {
+		color: var(--text-muted);
+		font-size: 0.7rem;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+
+	.cost-value {
+		font-family: 'SF Mono', 'Consolas', monospace;
+		font-size: 0.8rem;
+		color: var(--text-secondary);
+		font-variant-numeric: tabular-nums;
+	}
+
+	.cost-highlight {
+		color: var(--orange);
+		font-weight: 600;
+	}
+
+	/* Launch button */
 	.launch-btn {
 		width: 100%;
 		background: var(--blue);
 		border: none;
-		padding: 0.7rem 2rem;
+		padding: 0.75rem 2rem;
 		border-radius: 8px;
 		cursor: pointer;
 		color: white;
 		font-size: 0.85rem;
 		font-weight: 700;
-		transition: opacity 0.15s, box-shadow 0.15s;
+		transition: opacity 0.15s, box-shadow 0.15s, transform 0.1s;
 		box-shadow: 0 2px 4px rgba(9, 105, 218, 0.25);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.5rem;
+		min-height: 2.75rem;
 	}
 
-	.launch-btn:hover:not(:disabled) { opacity: 0.9; }
+	.launch-btn:hover:not(:disabled) {
+		opacity: 0.9;
+		transform: translateY(-1px);
+		box-shadow: 0 4px 8px rgba(9, 105, 218, 0.3);
+	}
+
+	.launch-btn:active:not(:disabled) {
+		transform: translateY(0);
+	}
+
 	.launch-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+	.launch-spinner {
+		display: inline-block;
+		width: 0.9rem;
+		height: 0.9rem;
+		border: 2px solid rgba(255, 255, 255, 0.3);
+		border-top-color: white;
+		border-radius: 50%;
+		animation: spin 0.6s linear infinite;
+	}
+
+	@keyframes spin {
+		to { transform: rotate(360deg); }
+	}
+
+	/* ── Responsive ── */
+	@media (max-width: 900px) {
+		.cards { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+		.field-grid.three-col { grid-template-columns: 1fr 1fr; }
+		.deploy-grid { grid-template-columns: 1fr; }
+	}
+
+	@media (max-width: 640px) {
+		.cards { grid-template-columns: repeat(2, 1fr); }
+		.deploy-section { padding: 1rem; }
+	}
+
+	@media (max-width: 480px) {
+		h1 { font-size: 1.25rem; }
+		.cards { grid-template-columns: 1fr 1fr; gap: 0.4rem; }
+		.field-grid { grid-template-columns: 1fr; }
+		.field-grid.three-col { grid-template-columns: 1fr; }
+		.deploy-section { padding: 0.85rem; border-radius: 8px; }
+		.deploy-grid { gap: 0.75rem; }
+		.tabs button { padding: 0.5rem 0.75rem; font-size: 0.8rem; }
+	}
 </style>
