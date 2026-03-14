@@ -103,7 +103,7 @@ class LightGBMModel(NumeraiModel):
         ]
 
         if epoch_callback:
-            callbacks.append(self._make_epoch_callback(epoch_callback, every_n=100))
+            callbacks.append(self._make_epoch_callback(epoch_callback, every_n=50))
 
         self._model = lgb.train(
             self.params,

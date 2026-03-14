@@ -92,11 +92,14 @@ def handler(event, context):
 
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-            # Find active runs with SageMaker jobs
+            # Find active runs, plus recently finished runs missing cost
             cur.execute(
                 "SELECT id, sagemaker_job_name, experiment_id, model_type FROM ml_runs "
-                "WHERE status IN ('pending', 'running') "
-                "AND sagemaker_job_name IS NOT NULL"
+                "WHERE sagemaker_job_name IS NOT NULL AND ("
+                "  status IN ('pending', 'running') "
+                "  OR (status IN ('completed', 'failed') AND cost_usd IS NULL "
+                "      AND finished_at > NOW() - INTERVAL '1 day')"
+                ")"
             )
             active_runs = cur.fetchall()
 
@@ -188,7 +191,7 @@ def _process_run(cur, sm, s3, run_id: int, job_name: str, experiment_id: int = 0
             updates["finished_at"] = resp["TrainingEndTime"].isoformat()
 
         # Compute cost from BillableSeconds
-        billable_seconds = resp.get("BillableSeconds")
+        billable_seconds = resp.get("BillableTimeInSeconds")
         if billable_seconds and inst_type:
             hourly_rate = INSTANCE_HOURLY_RATES.get(inst_type, 0)
             if hourly_rate:
@@ -217,7 +220,7 @@ def _process_run(cur, sm, s3, run_id: int, job_name: str, experiment_id: int = 0
         if resp.get("TrainingEndTime"):
             updates["finished_at"] = resp["TrainingEndTime"].isoformat()
         # Still compute cost for failed jobs
-        billable_seconds = resp.get("BillableSeconds")
+        billable_seconds = resp.get("BillableTimeInSeconds")
         if billable_seconds and inst_type:
             hourly_rate = INSTANCE_HOURLY_RATES.get(inst_type, 0)
             if hourly_rate:
@@ -227,7 +230,7 @@ def _process_run(cur, sm, s3, run_id: int, job_name: str, experiment_id: int = 0
         updates["error_message"] = "Job stopped"
         if resp.get("TrainingEndTime"):
             updates["finished_at"] = resp["TrainingEndTime"].isoformat()
-        billable_seconds = resp.get("BillableSeconds")
+        billable_seconds = resp.get("BillableTimeInSeconds")
         if billable_seconds and inst_type:
             hourly_rate = INSTANCE_HOURLY_RATES.get(inst_type, 0)
             if hourly_rate:

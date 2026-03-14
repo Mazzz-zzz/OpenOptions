@@ -25,11 +25,12 @@
 		if (trainPts.length > 0) {
 			traces.push({
 				type: 'scatter',
-				mode: 'lines',
+				mode: trainPts.length === 1 ? 'lines+markers' : 'lines',
 				x: trainPts.map((m) => m.epoch),
 				y: trainPts.map((m) => m.train_loss),
 				name: 'Train Loss',
-				line: { color: colors.blue, width: 2 }
+				line: { color: colors.blue, width: 2 },
+				marker: { size: 6 }
 			});
 		}
 
@@ -37,11 +38,12 @@
 		if (valPts.length > 0) {
 			traces.push({
 				type: 'scatter',
-				mode: 'lines',
+				mode: valPts.length === 1 ? 'lines+markers' : 'lines',
 				x: valPts.map((m) => m.epoch),
 				y: valPts.map((m) => m.val_loss),
 				name: 'Val Loss',
-				line: { color: colors.red, width: 2 }
+				line: { color: colors.red, width: 2 },
+				marker: { size: 6 }
 			});
 		}
 

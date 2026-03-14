@@ -110,7 +110,7 @@ class CatBoostModel(NumeraiModel):
         # Prepare callbacks
         callbacks = []
         if epoch_callback:
-            callbacks.append(self._make_epoch_callback(epoch_callback, every_n=100))
+            callbacks.append(self._make_epoch_callback(epoch_callback, every_n=50))
 
         # Train with early stopping
         self._model.fit(
