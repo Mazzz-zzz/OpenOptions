@@ -33,6 +33,16 @@ export const api = {
 		return request<{ data: FetchedUnderlying[] }>('GET', '/underlyings');
 	},
 
+	// Exogenous
+	getExoSources() {
+		return request<{ data: ExoSource[] }>('GET', '/exogenous/sources');
+	},
+
+	getExoTastytrade(date?: string) {
+		const qs = date ? `?date=${date}` : '';
+		return request<{ data: ExoTastytradeRow[] }>('GET', `/exogenous/tastytrade${qs}`);
+	},
+
 	// Fetch
 	fetchChain(underlying: string, force = false) {
 		const qs = force ? '?force=true' : '';
@@ -149,6 +159,29 @@ export interface FetchedUnderlying {
 	iv_rank: number | null;
 	iv_percentile: number | null;
 	liquidity_rating: number | null;
+}
+
+export interface ExoSource {
+	id: number;
+	key: string;
+	name: string;
+	source_type: string;
+	enabled: boolean;
+	row_count: number;
+	symbols: number;
+	min_date: string | null;
+	max_date: string | null;
+}
+
+export interface ExoTastytradeRow {
+	symbol: string;
+	captured_date: string;
+	spot_price: number | null;
+	iv_rank: number | null;
+	iv_percentile: number | null;
+	iv_index: number | null;
+	iv_5d_change: number | null;
+	liquidity: number | null;
 }
 
 export interface Alert {

@@ -806,7 +806,7 @@
 
 	th {
 		text-align: left;
-		padding: 0.4rem 0.5rem;
+		padding: 0.5rem 0.875rem;
 		border-bottom: 2px solid var(--border);
 		color: var(--text-secondary);
 		font-weight: 600;
@@ -817,7 +817,7 @@
 	}
 
 	td {
-		padding: 0.35rem 0.5rem;
+		padding: 0.45rem 0.875rem;
 		border-bottom: 1px solid var(--border-light);
 	}
 

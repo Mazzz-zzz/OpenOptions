@@ -6,7 +6,8 @@
 		type MlEpochMetric,
 		type MlExperimentData,
 		type TrainRequest,
-		type FetchedUnderlying
+		type ExoSource,
+		type ExoTastytradeRow
 	} from '$lib/api';
 	import { addToast } from '$lib/stores';
 	import {
@@ -87,18 +88,17 @@
 		};
 	});
 
-	// Exogenous data — live from /underlyings API
-	let tastyUnderlyings = $state<FetchedUnderlying[]>([]);
+	// Exogenous data — from exogenous database
+	let exoSources = $state<ExoSource[]>([]);
+	let tastyRows = $state<ExoTastytradeRow[]>([]);
 	let exoLoading = $state(false);
 
-	// Filter to tastytrade equity symbols only (not crypto/futures)
-	let tastyEquities = $derived(
-		tastyUnderlyings.filter(u => u.source === 'tastytrade' && u.market === 'equity')
-	);
+	// Source stats from registry
+	let tastySource = $derived(exoSources.find(s => s.key === 'tastytrade'));
 
 	// Symbols with actual IV metrics populated
 	let symbolsWithMetrics = $derived(
-		tastyEquities.filter(u => u.iv_rank !== null || u.iv_percentile !== null)
+		tastyRows.filter(u => u.iv_rank !== null || u.iv_percentile !== null)
 	);
 
 	let expandedSource = $state<string | null>(null);
@@ -106,8 +106,8 @@
 
 	let filteredSymbols = $derived(
 		symbolSearch
-			? tastyEquities.filter(u => u.symbol.toLowerCase().includes(symbolSearch.toLowerCase()))
-			: tastyEquities
+			? tastyRows.filter(u => u.symbol.toLowerCase().includes(symbolSearch.toLowerCase()))
+			: tastyRows
 	);
 
 	// Feature catalog — static definitions, coverage computed from live data
@@ -115,13 +115,13 @@
 		{ name: 'opt_iv_rank', field: 'iv_rank' as const, desc: 'IV rank (0-100) — where current IV sits vs 52-week range', signal: 'medium' as const },
 		{ name: 'opt_iv_percentile', field: 'iv_percentile' as const, desc: 'IV percentile (0-100) — % of days IV was lower', signal: 'medium' as const },
 		{ name: 'opt_iv_index', field: 'iv_index' as const, desc: 'Current IV index level (decimal)', signal: 'low' as const },
-		{ name: 'opt_iv_5d_chg', field: 'iv_index_5d_change' as const, desc: 'IV index 5-day change — vol momentum', signal: 'high' as const },
+		{ name: 'opt_iv_5d_chg', field: 'iv_5d_change' as const, desc: 'IV index 5-day change — vol momentum', signal: 'high' as const },
 	];
 
-	function featureCoverage(field: keyof FetchedUnderlying): number {
-		if (tastyEquities.length === 0) return 0;
-		const hasValue = tastyEquities.filter(u => u[field] !== null).length;
-		return Math.round(hasValue / tastyEquities.length * 100);
+	function featureCoverage(field: keyof ExoTastytradeRow): number {
+		if (tastyRows.length === 0) return 0;
+		const hasValue = tastyRows.filter(u => u[field] !== null).length;
+		return Math.round(hasValue / tastyRows.length * 100);
 	}
 
 	function signalColor(signal: string): string {
@@ -147,8 +147,12 @@
 	async function loadExogenousData() {
 		exoLoading = true;
 		try {
-			const res = await api.getUnderlyings();
-			tastyUnderlyings = res.data;
+			const [sourcesRes, tastyRes] = await Promise.all([
+				api.getExoSources(),
+				api.getExoTastytrade(),
+			]);
+			exoSources = sourcesRes.data;
+			tastyRows = tastyRes.data;
 		} catch {
 			// silent
 		} finally {
@@ -646,40 +650,42 @@
 		<div class="section">
 			<h2>Data Sources</h2>
 			<div class="exo-sources">
-				<div class="exo-source-card" class:expanded={expandedSource === 'tastytrade'}>
-					<button class="exo-source-header" onclick={() => expandedSource = expandedSource === 'tastytrade' ? null : 'tastytrade'}>
-						<div class="exo-source-title">
-							<span class="exo-status-dot" class:active={tastyEquities.length > 0}></span>
-							<span class="exo-source-name">Tastytrade Options</span>
-							<span class="exo-source-badge" class:active={tastyEquities.length > 0}>
-								{tastyEquities.length > 0 ? 'active' : 'no data'}
-							</span>
-						</div>
-						<div class="exo-source-stats">
-							<span class="exo-stat"><strong>{tastyEquities.length}</strong> symbols</span>
-							<span class="exo-stat-sep">/</span>
-							<span class="exo-stat"><strong>{symbolsWithMetrics.length}</strong> with metrics</span>
-							<span class="exo-stat-sep">/</span>
-							<span class="exo-stat"><strong>4</strong> features</span>
-						</div>
-					</button>
-					{#if expandedSource === 'tastytrade'}
-						<div class="exo-source-detail">
-							<div class="exo-detail-row">
-								<span class="exo-detail-label">Provider</span>
-								<span class="exo-detail-value mono">Tastytrade REST API</span>
+				{#each exoSources as src}
+					<div class="exo-source-card" class:expanded={expandedSource === src.key}>
+						<button class="exo-source-header" onclick={() => expandedSource = expandedSource === src.key ? null : src.key}>
+							<div class="exo-source-title">
+								<span class="exo-status-dot" class:active={src.row_count > 0}></span>
+								<span class="exo-source-name">{src.name}</span>
+								<span class="exo-source-badge" class:active={src.row_count > 0}>
+									{src.row_count > 0 ? 'active' : 'no data'}
+								</span>
 							</div>
-							<div class="exo-detail-row">
-								<span class="exo-detail-label">Metrics available</span>
-								<span class="exo-detail-value">IV rank, IV percentile, IV index, 5d change</span>
+							<div class="exo-source-stats">
+								<span class="exo-stat"><strong>{src.symbols || '\u2014'}</strong> symbols</span>
+								<span class="exo-stat-sep">/</span>
+								<span class="exo-stat"><strong>{src.row_count}</strong> rows</span>
+								<span class="exo-stat-sep">/</span>
+								<span class="exo-stat">{src.source_type}</span>
 							</div>
-							<div class="exo-detail-row">
-								<span class="exo-detail-label">Storage</span>
-								<span class="exo-detail-value">Latest values in underlyings table (overwritten on fetch)</span>
+						</button>
+						{#if expandedSource === src.key}
+							<div class="exo-source-detail">
+								<div class="exo-detail-row">
+									<span class="exo-detail-label">Type</span>
+									<span class="exo-detail-value">{src.source_type === 'per_symbol' ? 'Per-symbol (joined on symbol + date)' : 'Market-wide (broadcast to all stocks)'}</span>
+								</div>
+								<div class="exo-detail-row">
+									<span class="exo-detail-label">Date range</span>
+									<span class="exo-detail-value mono">{src.min_date ?? 'none'} &mdash; {src.max_date ?? 'none'}</span>
+								</div>
+								<div class="exo-detail-row">
+									<span class="exo-detail-label">Database</span>
+									<span class="exo-detail-value mono">exogenous.exo_{src.key}</span>
+								</div>
 							</div>
-						</div>
-					{/if}
-				</div>
+						{/if}
+					</div>
+				{/each}
 				<div class="exo-source-card exo-add-card">
 					<div class="exo-add-inner">
 						<span class="exo-add-icon">+</span>
@@ -740,13 +746,13 @@
 		<!-- Tracked Symbols with live data -->
 		<div class="section">
 			<div class="symbol-header">
-				<h2>Tracked Symbols ({tastyEquities.length})</h2>
+				<h2>Tracked Symbols ({tastyRows.length})</h2>
 				<input type="text" class="symbol-search" bind:value={symbolSearch} placeholder="Filter symbols..." />
 			</div>
 			{#if exoLoading}
 				<p class="placeholder">Loading...</p>
-			{:else if tastyEquities.length === 0}
-				<p class="placeholder">No Tastytrade symbols fetched yet. Use the dashboard to fetch option chains.</p>
+			{:else if tastyRows.length === 0}
+				<p class="placeholder">No exogenous data yet. Fetch option chains from the dashboard to start collecting.</p>
 			{:else}
 				<div class="table-wrapper">
 					<table>

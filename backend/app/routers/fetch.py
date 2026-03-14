@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
-from app.database import get_db
+from app.database import get_db, get_exo_db
 from app.models import Alert, Contract, Dividend, Earning, Snapshot, Underlying
 from app.services.detector import classify_mispricing
 from app.services.deribit import DeribitClient
@@ -297,6 +297,13 @@ async def fetch_chain(
 
     db.commit()
 
+    # 10. Write to exogenous DB (best-effort, non-blocking)
+    if market_metrics and not is_crypto:
+        try:
+            _write_exo_tastytrade(underlying, underlying_price, market_metrics)
+        except Exception:
+            logger.warning("Failed to write exo_tastytrade for %s", underlying, exc_info=True)
+
     return {
         "underlying": underlying,
         "source": source,
@@ -395,3 +402,39 @@ def _upsert_dividends(db: Session, underlying_id: int, dividends: list[dict]) ->
         if d not in existing:
             db.add(Dividend(underlying_id=underlying_id, occurred_date=d, amount=div.get("amount")))
             existing.add(d)
+
+
+def _write_exo_tastytrade(symbol: str, spot: float, metrics: dict) -> None:
+    """Write a daily row to the exogenous DB (upsert by symbol+date)."""
+    from sqlalchemy import text
+
+    exo_gen = get_exo_db()
+    exo = next(exo_gen)
+    try:
+        today = date.today()
+        exo.execute(
+            text("""
+                INSERT INTO exo_tastytrade (symbol, captured_date, spot_price, iv_rank, iv_percentile, iv_index, iv_5d_change, liquidity)
+                VALUES (:sym, :dt, :spot, :ivr, :ivp, :ivi, :iv5, :liq)
+                ON CONFLICT (symbol, captured_date) DO UPDATE SET
+                    spot_price = EXCLUDED.spot_price,
+                    iv_rank = EXCLUDED.iv_rank,
+                    iv_percentile = EXCLUDED.iv_percentile,
+                    iv_index = EXCLUDED.iv_index,
+                    iv_5d_change = EXCLUDED.iv_5d_change,
+                    liquidity = EXCLUDED.liquidity
+            """),
+            {
+                "sym": symbol,
+                "dt": today,
+                "spot": spot,
+                "ivr": metrics.get("iv_rank"),
+                "ivp": metrics.get("iv_percentile"),
+                "ivi": metrics.get("iv_index"),
+                "iv5": metrics.get("iv_index_5d_change"),
+                "liq": metrics.get("liquidity"),
+            },
+        )
+        exo.commit()
+    finally:
+        exo.close()

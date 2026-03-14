@@ -51,11 +51,21 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
 
+    # Exogenous DB (same RDS instance, separate database)
+    exo_db_name: str = "exogenous"
+
     @property
     def database_url(self) -> str:
         return (
             f"postgresql://{self.db_user}:{self.db_password}"
             f"@{self.db_host}:{self.db_port}/{self.db_name}"
+        )
+
+    @property
+    def exo_database_url(self) -> str:
+        return (
+            f"postgresql://{self.db_user}:{self.db_password}"
+            f"@{self.db_host}:{self.db_port}/{self.exo_db_name}"
         )
 
 
