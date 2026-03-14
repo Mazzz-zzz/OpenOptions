@@ -133,17 +133,6 @@
 		}
 	}
 
-	function timeAgo(iso: string | null): string {
-		if (!iso) return 'never';
-		const diff = Date.now() - new Date(iso).getTime();
-		const mins = Math.floor(diff / 60000);
-		if (mins < 60) return `${mins}m ago`;
-		const hrs = Math.floor(mins / 60);
-		if (hrs < 24) return `${hrs}h ago`;
-		const days = Math.floor(hrs / 24);
-		return `${days}d ago`;
-	}
-
 	async function loadExogenousData() {
 		exoLoading = true;
 		try {
@@ -764,23 +753,21 @@
 								<th class="num">IV Pctl</th>
 								<th class="num">IV Index</th>
 								<th class="num">5d Chg</th>
-								<th class="num">Snapshots</th>
-								<th>Last Fetched</th>
+								<th>Date</th>
 							</tr>
 						</thead>
 						<tbody>
 							{#each filteredSymbols as u}
 								<tr>
 									<td class="mono">{u.symbol}</td>
-									<td class="num">{u.last_spot !== null ? u.last_spot.toFixed(2) : '\u2014'}</td>
+									<td class="num">{u.spot_price !== null ? u.spot_price.toFixed(2) : '\u2014'}</td>
 									<td class="num">{u.iv_rank !== null ? u.iv_rank.toFixed(1) : '\u2014'}</td>
 									<td class="num">{u.iv_percentile !== null ? u.iv_percentile.toFixed(1) : '\u2014'}</td>
 									<td class="num">{u.iv_index !== null ? (u.iv_index * 100).toFixed(1) + '%' : '\u2014'}</td>
-									<td class="num" class:positive={u.iv_index_5d_change !== null && u.iv_index_5d_change > 0} class:negative={u.iv_index_5d_change !== null && u.iv_index_5d_change < 0}>
-										{u.iv_index_5d_change !== null ? (u.iv_index_5d_change > 0 ? '+' : '') + (u.iv_index_5d_change * 100).toFixed(2) + '%' : '\u2014'}
+									<td class="num" class:positive={u.iv_5d_change !== null && u.iv_5d_change > 0} class:negative={u.iv_5d_change !== null && u.iv_5d_change < 0}>
+										{u.iv_5d_change !== null ? (u.iv_5d_change > 0 ? '+' : '') + (u.iv_5d_change * 100).toFixed(2) + '%' : '\u2014'}
 									</td>
-									<td class="num">{u.last_snapshot_count}</td>
-									<td class="dim">{timeAgo(u.last_fetched_at)}</td>
+									<td class="dim">{u.captured_date}</td>
 								</tr>
 							{/each}
 						</tbody>
