@@ -144,6 +144,11 @@ export interface FetchedUnderlying {
 	last_spot: number | null;
 	last_snapshot_count: number;
 	last_alert_count: number;
+	iv_index: number | null;
+	iv_index_5d_change: number | null;
+	iv_rank: number | null;
+	iv_percentile: number | null;
+	liquidity_rating: number | null;
 }
 
 export interface Alert {

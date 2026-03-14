@@ -5,7 +5,8 @@
 		type MlRunData,
 		type MlEpochMetric,
 		type MlExperimentData,
-		type TrainRequest
+		type TrainRequest,
+		type FetchedUnderlying
 	} from '$lib/api';
 	import { addToast } from '$lib/stores';
 	import {
@@ -86,81 +87,42 @@
 		};
 	});
 
-	// Exogenous data sources
-	interface ExoSource {
-		id: string;
-		name: string;
-		status: 'active' | 'planned' | 'disabled';
-		provider: string;
-		symbols: number;
-		universe: number;
-		historyDays: number;
-		features: ExoFeature[];
-	}
-	interface ExoFeature {
-		name: string;
-		source: string;
-		desc: string;
-		coverage: number;
-		signal: 'high' | 'medium' | 'low' | 'unknown';
-		usedInRuns: number;
-	}
+	// Exogenous data — live from /underlyings API
+	let tastyUnderlyings = $state<FetchedUnderlying[]>([]);
+	let exoLoading = $state(false);
 
-	const exoSources: ExoSource[] = [
-		{
-			id: 'tastytrade',
-			name: 'Tastytrade Options',
-			status: 'active',
-			provider: 'Tastytrade REST API',
-			symbols: exogenousSymbols.split(',').filter(Boolean).length,
-			universe: 5000,
-			historyDays: 0,
-			features: [
-				{ name: 'opt_iv_rank', source: 'tastytrade', desc: 'IV rank (0-100) — where current IV sits vs 52-week range', coverage: 9.7, signal: 'medium', usedInRuns: 0 },
-				{ name: 'opt_iv_percentile', source: 'tastytrade', desc: 'IV percentile (0-100) — % of days IV was lower', coverage: 9.7, signal: 'medium', usedInRuns: 0 },
-				{ name: 'opt_iv_index', source: 'tastytrade', desc: 'Current IV index level (decimal)', coverage: 9.7, signal: 'low', usedInRuns: 0 },
-				{ name: 'opt_iv_5d_chg', source: 'tastytrade', desc: 'IV index 5-day change — vol momentum', coverage: 9.7, signal: 'high', usedInRuns: 0 },
-				{ name: 'opt_skew_25d', source: 'tastytrade', desc: '25-delta risk reversal (put IV - call IV) — downside fear', coverage: 8.1, signal: 'high', usedInRuns: 0 },
-				{ name: 'opt_term_slope', source: 'tastytrade', desc: 'Near vs far expiry IV slope — event risk signal', coverage: 8.1, signal: 'medium', usedInRuns: 0 },
-			],
-		},
-	];
+	// Filter to tastytrade equity symbols only (not crypto/futures)
+	let tastyEquities = $derived(
+		tastyUnderlyings.filter(u => u.source === 'tastytrade' && u.market === 'equity')
+	);
 
-	const coverageBySector = [
-		{ sector: 'Technology', pct: 82 },
-		{ sector: 'Financials', pct: 58 },
-		{ sector: 'Healthcare', pct: 37 },
-		{ sector: 'Energy', pct: 31 },
-		{ sector: 'Consumer Disc.', pct: 45 },
-		{ sector: 'Industrials', pct: 28 },
-		{ sector: 'Comm. Services', pct: 52 },
-		{ sector: 'Utilities', pct: 12 },
-	];
-
-	const coverageByMcap = [
-		{ tier: 'Mega (>200B)', pct: 94 },
-		{ tier: 'Large (10-200B)', pct: 68 },
-		{ tier: 'Mid (2-10B)', pct: 35 },
-		{ tier: 'Small (300M-2B)', pct: 8 },
-		{ tier: 'Micro (<300M)', pct: 1 },
-	];
+	// Symbols with actual IV metrics populated
+	let symbolsWithMetrics = $derived(
+		tastyEquities.filter(u => u.iv_rank !== null || u.iv_percentile !== null)
+	);
 
 	let expandedSource = $state<string | null>(null);
 	let symbolSearch = $state('');
 
-	// Parsed symbol list for the symbol table
-	let parsedSymbols = $derived(
-		exogenousSymbols.split(',').map(s => s.trim()).filter(Boolean)
-	);
-
 	let filteredSymbols = $derived(
 		symbolSearch
-			? parsedSymbols.filter(s => s.toLowerCase().includes(symbolSearch.toLowerCase()))
-			: parsedSymbols
+			? tastyEquities.filter(u => u.symbol.toLowerCase().includes(symbolSearch.toLowerCase()))
+			: tastyEquities
 	);
 
-	// All features across all sources
-	let allFeatures = $derived(exoSources.flatMap(s => s.features));
+	// Feature catalog — static definitions, coverage computed from live data
+	const featureDefs = [
+		{ name: 'opt_iv_rank', field: 'iv_rank' as const, desc: 'IV rank (0-100) — where current IV sits vs 52-week range', signal: 'medium' as const },
+		{ name: 'opt_iv_percentile', field: 'iv_percentile' as const, desc: 'IV percentile (0-100) — % of days IV was lower', signal: 'medium' as const },
+		{ name: 'opt_iv_index', field: 'iv_index' as const, desc: 'Current IV index level (decimal)', signal: 'low' as const },
+		{ name: 'opt_iv_5d_chg', field: 'iv_index_5d_change' as const, desc: 'IV index 5-day change — vol momentum', signal: 'high' as const },
+	];
+
+	function featureCoverage(field: keyof FetchedUnderlying): number {
+		if (tastyEquities.length === 0) return 0;
+		const hasValue = tastyEquities.filter(u => u[field] !== null).length;
+		return Math.round(hasValue / tastyEquities.length * 100);
+	}
 
 	function signalColor(signal: string): string {
 		switch (signal) {
@@ -168,6 +130,29 @@
 			case 'medium': return 'var(--orange)';
 			case 'low': return 'var(--text-muted)';
 			default: return 'var(--text-muted)';
+		}
+	}
+
+	function timeAgo(iso: string | null): string {
+		if (!iso) return 'never';
+		const diff = Date.now() - new Date(iso).getTime();
+		const mins = Math.floor(diff / 60000);
+		if (mins < 60) return `${mins}m ago`;
+		const hrs = Math.floor(mins / 60);
+		if (hrs < 24) return `${hrs}h ago`;
+		const days = Math.floor(hrs / 24);
+		return `${days}d ago`;
+	}
+
+	async function loadExogenousData() {
+		exoLoading = true;
+		try {
+			const res = await api.getUnderlyings();
+			tastyUnderlyings = res.data;
+		} catch {
+			// silent
+		} finally {
+			exoLoading = false;
 		}
 	}
 
@@ -234,7 +219,8 @@
 				loadMlOverview('signals'),
 				mlExperiments.refresh('signals'),
 				loadMlModels('signals'),
-				loadMlRounds('signals')
+				loadMlRounds('signals'),
+				loadExogenousData()
 			]);
 			if (($mlOverview?.active_runs ?? 0) > 0) {
 				startPolling('signals');
@@ -660,46 +646,40 @@
 		<div class="section">
 			<h2>Data Sources</h2>
 			<div class="exo-sources">
-				{#each exoSources as src}
-					<div class="exo-source-card" class:expanded={expandedSource === src.id}>
-						<button class="exo-source-header" onclick={() => expandedSource = expandedSource === src.id ? null : src.id}>
-							<div class="exo-source-title">
-								<span class="exo-status-dot" class:active={src.status === 'active'} class:planned={src.status === 'planned'}></span>
-								<span class="exo-source-name">{src.name}</span>
-								<span class="exo-source-badge" class:active={src.status === 'active'} class:planned={src.status === 'planned'}>
-									{src.status}
-								</span>
+				<div class="exo-source-card" class:expanded={expandedSource === 'tastytrade'}>
+					<button class="exo-source-header" onclick={() => expandedSource = expandedSource === 'tastytrade' ? null : 'tastytrade'}>
+						<div class="exo-source-title">
+							<span class="exo-status-dot" class:active={tastyEquities.length > 0}></span>
+							<span class="exo-source-name">Tastytrade Options</span>
+							<span class="exo-source-badge" class:active={tastyEquities.length > 0}>
+								{tastyEquities.length > 0 ? 'active' : 'no data'}
+							</span>
+						</div>
+						<div class="exo-source-stats">
+							<span class="exo-stat"><strong>{tastyEquities.length}</strong> symbols</span>
+							<span class="exo-stat-sep">/</span>
+							<span class="exo-stat"><strong>{symbolsWithMetrics.length}</strong> with metrics</span>
+							<span class="exo-stat-sep">/</span>
+							<span class="exo-stat"><strong>4</strong> features</span>
+						</div>
+					</button>
+					{#if expandedSource === 'tastytrade'}
+						<div class="exo-source-detail">
+							<div class="exo-detail-row">
+								<span class="exo-detail-label">Provider</span>
+								<span class="exo-detail-value mono">Tastytrade REST API</span>
 							</div>
-							<div class="exo-source-stats">
-								<span class="exo-stat"><strong>{src.symbols}</strong> symbols</span>
-								<span class="exo-stat-sep">/</span>
-								<span class="exo-stat"><strong>{src.features.length}</strong> features</span>
-								<span class="exo-stat-sep">/</span>
-								<span class="exo-stat"><strong>{(src.symbols / src.universe * 100).toFixed(1)}%</strong> coverage</span>
+							<div class="exo-detail-row">
+								<span class="exo-detail-label">Metrics available</span>
+								<span class="exo-detail-value">IV rank, IV percentile, IV index, 5d change</span>
 							</div>
-						</button>
-						{#if expandedSource === src.id}
-							<div class="exo-source-detail">
-								<div class="exo-detail-row">
-									<span class="exo-detail-label">Provider</span>
-									<span class="exo-detail-value mono">{src.provider}</span>
-								</div>
-								<div class="exo-detail-row">
-									<span class="exo-detail-label">History</span>
-									<span class="exo-detail-value">{src.historyDays > 0 ? `${src.historyDays} days` : 'Not yet collecting'}</span>
-								</div>
-								<div class="exo-detail-row">
-									<span class="exo-detail-label">Universe coverage</span>
-									<span class="exo-detail-value">{src.symbols} / ~{src.universe.toLocaleString()} stocks</span>
-								</div>
-								<div class="exo-detail-row">
-									<span class="exo-detail-label">Metrics</span>
-									<span class="exo-detail-value">IV rank, IV percentile, IV index, 5d change, skew, term structure</span>
-								</div>
+							<div class="exo-detail-row">
+								<span class="exo-detail-label">Storage</span>
+								<span class="exo-detail-value">Latest values in underlyings table (overwritten on fetch)</span>
 							</div>
-						{/if}
-					</div>
-				{/each}
+						</div>
+					{/if}
+				</div>
 				<div class="exo-source-card exo-add-card">
 					<div class="exo-add-inner">
 						<span class="exo-add-icon">+</span>
@@ -722,22 +702,20 @@
 							<th>Description</th>
 							<th class="num">Coverage</th>
 							<th class="num">Signal</th>
-							<th class="num">Runs</th>
 						</tr>
 					</thead>
 					<tbody>
-						{#each allFeatures as feat}
+						{#each featureDefs as feat}
 							<tr>
 								<td class="mono">{feat.name}</td>
-								<td>{feat.source}</td>
+								<td>tastytrade</td>
 								<td class="exo-feat-desc">{feat.desc}</td>
-								<td class="num">{feat.coverage.toFixed(1)}%</td>
+								<td class="num">{featureCoverage(feat.field)}%</td>
 								<td class="num">
 									<span class="signal-badge" style="color: {signalColor(feat.signal)}">
 										{feat.signal}
 									</span>
 								</td>
-								<td class="num">{feat.usedInRuns}</td>
 							</tr>
 						{/each}
 						<tr class="derived-row">
@@ -746,67 +724,63 @@
 							<td class="exo-feat-desc">Binary flag: 1 if stock has options data, 0 otherwise</td>
 							<td class="num">100%</td>
 							<td class="num"><span class="signal-badge" style="color: var(--text-muted)">low</span></td>
-							<td class="num">0</td>
 						</tr>
 						<tr class="derived-row">
 							<td class="mono">opt_iv_rank_zscore</td>
 							<td>derived</td>
 							<td class="exo-feat-desc">Cross-sectional z-score of IV rank per era</td>
-							<td class="num">9.7%</td>
+							<td class="num">{featureCoverage('iv_rank')}%</td>
 							<td class="num"><span class="signal-badge" style="color: var(--green)">high</span></td>
-							<td class="num">0</td>
 						</tr>
 					</tbody>
 				</table>
 			</div>
 		</div>
 
-		<!-- Coverage -->
-		<div class="section">
-			<h2>Coverage Estimates</h2>
-			<div class="coverage-grid">
-				<div class="coverage-panel">
-					<h3>By Sector</h3>
-					{#each coverageBySector as row}
-						<div class="coverage-row">
-							<span class="coverage-label">{row.sector}</span>
-							<div class="coverage-bar-track">
-								<div class="coverage-bar-fill" style="width: {row.pct}%"></div>
-							</div>
-							<span class="coverage-pct">{row.pct}%</span>
-						</div>
-					{/each}
-				</div>
-				<div class="coverage-panel">
-					<h3>By Market Cap</h3>
-					{#each coverageByMcap as row}
-						<div class="coverage-row">
-							<span class="coverage-label">{row.tier}</span>
-							<div class="coverage-bar-track">
-								<div class="coverage-bar-fill" style="width: {row.pct}%"></div>
-							</div>
-							<span class="coverage-pct">{row.pct}%</span>
-						</div>
-					{/each}
-				</div>
-			</div>
-		</div>
-
-		<!-- Symbol List -->
+		<!-- Tracked Symbols with live data -->
 		<div class="section">
 			<div class="symbol-header">
-				<h2>Tracked Symbols ({parsedSymbols.length})</h2>
+				<h2>Tracked Symbols ({tastyEquities.length})</h2>
 				<input type="text" class="symbol-search" bind:value={symbolSearch} placeholder="Filter symbols..." />
 			</div>
-			<div class="symbol-grid">
-				{#each filteredSymbols as sym}
-					<span class="symbol-chip">{sym}</span>
-				{/each}
-				{#if filteredSymbols.length === 0}
-					<span class="dim">No symbols match</span>
-				{/if}
-			</div>
-			<p class="symbol-hint">Edit the symbol list in the Deploy tab under Exogenous Options Data.</p>
+			{#if exoLoading}
+				<p class="placeholder">Loading...</p>
+			{:else if tastyEquities.length === 0}
+				<p class="placeholder">No Tastytrade symbols fetched yet. Use the dashboard to fetch option chains.</p>
+			{:else}
+				<div class="table-wrapper">
+					<table>
+						<thead>
+							<tr>
+								<th>Symbol</th>
+								<th class="num">Spot</th>
+								<th class="num">IV Rank</th>
+								<th class="num">IV Pctl</th>
+								<th class="num">IV Index</th>
+								<th class="num">5d Chg</th>
+								<th class="num">Snapshots</th>
+								<th>Last Fetched</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each filteredSymbols as u}
+								<tr>
+									<td class="mono">{u.symbol}</td>
+									<td class="num">{u.last_spot !== null ? u.last_spot.toFixed(2) : '\u2014'}</td>
+									<td class="num">{u.iv_rank !== null ? u.iv_rank.toFixed(1) : '\u2014'}</td>
+									<td class="num">{u.iv_percentile !== null ? u.iv_percentile.toFixed(1) : '\u2014'}</td>
+									<td class="num">{u.iv_index !== null ? (u.iv_index * 100).toFixed(1) + '%' : '\u2014'}</td>
+									<td class="num" class:positive={u.iv_index_5d_change !== null && u.iv_index_5d_change > 0} class:negative={u.iv_index_5d_change !== null && u.iv_index_5d_change < 0}>
+										{u.iv_index_5d_change !== null ? (u.iv_index_5d_change > 0 ? '+' : '') + (u.iv_index_5d_change * 100).toFixed(2) + '%' : '\u2014'}
+									</td>
+									<td class="num">{u.last_snapshot_count}</td>
+									<td class="dim">{timeAgo(u.last_fetched_at)}</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			{/if}
 		</div>
 
 	<!-- Experiments Tab -->
@@ -1378,70 +1352,6 @@
 	.derived-row td { color: var(--text-muted); }
 	.derived-row .mono { font-style: italic; }
 
-	/* Coverage */
-	.coverage-grid {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 0.75rem;
-	}
-
-	.coverage-panel {
-		background: var(--bg-card);
-		border: 1px solid var(--border-light);
-		border-radius: 8px;
-		padding: 0.75rem 0.85rem;
-		box-shadow: var(--shadow-sm);
-	}
-
-	.coverage-panel h3 {
-		font-size: 0.65rem;
-		text-transform: uppercase;
-		letter-spacing: 0.06em;
-		color: var(--text-secondary);
-		margin: 0 0 0.5rem 0;
-	}
-
-	.coverage-row {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		margin-bottom: 0.3rem;
-	}
-
-	.coverage-label {
-		font-size: 0.7rem;
-		color: var(--text-secondary);
-		width: 100px;
-		flex-shrink: 0;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-
-	.coverage-bar-track {
-		flex: 1;
-		height: 6px;
-		background: var(--bg-input);
-		border-radius: 3px;
-		overflow: hidden;
-	}
-
-	.coverage-bar-fill {
-		height: 100%;
-		background: var(--purple);
-		border-radius: 3px;
-		transition: width 0.3s;
-	}
-
-	.coverage-pct {
-		font-size: 0.68rem;
-		font-variant-numeric: tabular-nums;
-		color: var(--text-muted);
-		width: 32px;
-		text-align: right;
-		flex-shrink: 0;
-	}
-
 	/* Symbol list */
 	.symbol-header {
 		display: flex;
@@ -1469,29 +1379,6 @@
 		box-shadow: 0 0 0 2px rgba(130, 80, 223, 0.15);
 	}
 
-	.symbol-grid {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.35rem;
-	}
-
-	.symbol-chip {
-		display: inline-block;
-		padding: 0.2rem 0.5rem;
-		background: var(--bg-card);
-		border: 1px solid var(--border-light);
-		border-radius: 4px;
-		font-size: 0.72rem;
-		font-family: 'SF Mono', 'Consolas', monospace;
-		font-weight: 500;
-		color: var(--text);
-	}
-
-	.symbol-hint {
-		font-size: 0.68rem;
-		color: var(--text-muted);
-		margin: 0.5rem 0 0 0;
-	}
 
 	/* ── Deploy tab ── */
 	.deploy-form {
@@ -1823,7 +1710,6 @@
 		.field-grid.three-col { grid-template-columns: 1fr 1fr; }
 		.deploy-grid { grid-template-columns: 1fr; }
 		.exo-sources { grid-template-columns: 1fr; }
-		.coverage-grid { grid-template-columns: 1fr; }
 	}
 
 	@media (max-width: 640px) {
