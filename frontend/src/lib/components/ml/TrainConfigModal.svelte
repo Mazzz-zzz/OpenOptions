@@ -18,6 +18,8 @@
 	let uploadToNumerai = $state(false);
 	let showAdvanced = $state(false);
 	let hyperparamsText = $state('');
+	// NEW: Model configuration options
+	let neutralizationPct = $state(50);
 
 	function handleSubmit() {
 		if (!experimentName.trim()) return;
@@ -27,6 +29,7 @@
 			feature_set: featureSet,
 			model_type: modelType,
 			instance_type: instanceType,
+			neutralization_pct: neutralizationPct,
 		};
 
 		if (description.trim()) {
@@ -87,6 +90,7 @@
 						<span>Model Type</span>
 						<select bind:value={modelType}>
 							<option value="lgbm">LightGBM</option>
+							<option value="catboost">CatBoost</option>
 						</select>
 					</label>
 				</div>
@@ -97,6 +101,17 @@
 						<option value="ml.m5.xlarge">ml.m5.xlarge (4 vCPU, 16 GB)</option>
 						<option value="ml.m5.2xlarge">ml.m5.2xlarge (8 vCPU, 32 GB)</option>
 					</select>
+				</label>
+
+				<label>
+					<span>Feature Neutralization ({neutralizationPct}%)</span>
+					<input 
+						type="range" 
+						bind:value={neutralizationPct} 
+						min="0" 
+						max="100" 
+						step="5"
+					/>
 				</label>
 
 				<label class="checkbox-label">

@@ -117,6 +117,8 @@ class TrainRequest(BaseModel):
     instance_type: str = "ml.m5.xlarge"
     hyperparams: Optional[dict] = None
     upload: bool = False
+    # NEW: Model configuration options
+    neutralization_pct: float = 50.0  # 0-100
 
 
 class ExperimentCreate(BaseModel):
@@ -552,7 +554,7 @@ async def trigger_training(body: TrainRequest, db: Session = Depends(get_db)):
     if body.feature_set not in valid_feature_sets:
         raise HTTPException(status_code=400, detail=f"feature_set must be one of {valid_feature_sets}")
 
-    valid_model_types = {"lgbm"}
+    valid_model_types = {"lgbm", "catboost"}
     if body.model_type not in valid_model_types:
         raise HTTPException(status_code=400, detail=f"model_type must be one of {valid_model_types}")
 
@@ -591,6 +593,8 @@ async def trigger_training(body: TrainRequest, db: Session = Depends(get_db)):
             instance_type=body.instance_type,
             feature_set=body.feature_set,
             upload=body.upload,
+            model_type=body.model_type,
+            neutralization_pct=body.neutralization_pct,
         )
         run.sagemaker_job_name = job_name
         run.sagemaker_job_arn = job_arn

@@ -495,6 +495,8 @@ export interface TrainRequest {
 	instance_type: string;
 	hyperparams?: Record<string, unknown>;
 	upload?: boolean;
+	// NEW: Model configuration options
+	neutralization_pct?: number;  // 0-100, default 50
 }
 
 export interface TrainResponse {

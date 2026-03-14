@@ -49,7 +49,7 @@ from data.features import (
     get_feature_columns,
     neutralize_features,
 )
-from models.lgbm_model import LightGBMModel
+from models import create_model
 from training.submission import generate_submission, validate_submission
 from training.validate import compute_all_metrics
 
@@ -131,10 +131,23 @@ def run_training(
     upload: bool = False,
     progress_callback: Optional[Callable[[dict], None]] = None,
     epoch_callback: Optional[Callable[[dict], None]] = None,
+    model_type: str = "lgbm",
+    neutralization_pct: float = 50.0,
 ) -> dict:
     """Full training pipeline.
 
-    Returns a dict of validation metrics.
+    Args:
+        feature_set_name: Feature set to use (small/medium/all)
+        output_dir: Directory for output files
+        skip_download: Skip data download if True
+        upload: Upload to Numerai after training
+        progress_callback: Callback for progress updates
+        epoch_callback: Callback for epoch-level metrics
+        model_type: Model type (lgbm/catboost)
+        neutralization_pct: Neutralization proportion (0-100)
+
+    Returns:
+        Dict of validation metrics.
     """
     settings = get_ml_settings()
     output_path = Path(output_dir)
@@ -231,7 +244,8 @@ def run_training(
         mask = train_df[target].notna()
         train_subset = train_df[mask]
 
-        model = LightGBMModel(
+        model = create_model(
+            model_type=model_type,
             num_leaves=settings.default_num_leaves,
             max_depth=settings.default_max_depth,
             learning_rate=settings.default_learning_rate,
@@ -282,15 +296,18 @@ def run_training(
     neutralizer_cols = feature_cols[:settings.neutralization_top_n]
     neutralizer_cols = [c for c in neutralizer_cols if c in val_common.columns]
 
-    if neutralizer_cols and settings.neutralization_proportion > 0:
+    # Convert percentage (0-100) to proportion (0-1)
+    neutralization_proportion = neutralization_pct / 100.0
+    
+    if neutralizer_cols and neutralization_proportion > 0:
         val_common["prediction"] = neutralize_features(
             val_common,
             "prediction",
             neutralizer_cols,
-            proportion=settings.neutralization_proportion,
+            proportion=neutralization_proportion,
         )
         print(f"  Neutralized against {len(neutralizer_cols)} features "
-              f"(proportion={settings.neutralization_proportion})")
+              f"(proportion={neutralization_proportion:.0%})")
 
     # 8. Validation
     _progress("validation", 85)
@@ -376,14 +393,14 @@ def run_training(
         live_ensemble = _ensemble_predictions(live_predictions)
 
         # Neutralize live predictions
-        if neutralizer_cols and settings.neutralization_proportion > 0:
+        if neutralizer_cols and neutralization_proportion > 0:
             live_df_copy = live_df.copy()
             live_df_copy["prediction"] = live_ensemble.values
             live_ensemble = neutralize_features(
                 live_df_copy,
                 "prediction",
                 neutralizer_cols,
-                proportion=settings.neutralization_proportion,
+                proportion=neutralization_proportion,
             )
 
         # Get round number
@@ -432,6 +449,15 @@ def main():
         "--upload", action="store_true",
         help="Upload submission to Numerai (requires credentials)",
     )
+    parser.add_argument(
+        "--model-type", default="lgbm",
+        choices=["lgbm", "catboost"],
+        help="Model type: lgbm or catboost",
+    )
+    parser.add_argument(
+        "--neutralization-pct", type=float, default=50.0,
+        help="Neutralization percentage (0-100, default: 50)",
+    )
     args = parser.parse_args()
 
     run_training(
@@ -439,6 +465,8 @@ def main():
         output_dir=args.output,
         skip_download=args.skip_download,
         upload=args.upload,
+        model_type=args.model_type,
+        neutralization_pct=args.neutralization_pct,
     )
 
 

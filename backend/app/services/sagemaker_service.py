@@ -27,6 +27,8 @@ def create_training_job(
     instance_type: str = "ml.m5.xlarge",
     feature_set: str = "medium",
     upload: bool = False,
+    model_type: str = "lgbm",
+    neutralization_pct: float = 50.0,
 ) -> str:
     """Create a SageMaker training job. Returns the job ARN."""
     settings = get_settings()
@@ -39,6 +41,8 @@ def create_training_job(
     sm_hyperparams.setdefault("feature_set", feature_set)
     sm_hyperparams.setdefault("s3_bucket", settings.ml_s3_bucket)
     sm_hyperparams.setdefault("job_name", job_name)
+    sm_hyperparams.setdefault("model_type", model_type)
+    sm_hyperparams.setdefault("neutralization_pct", str(neutralization_pct))
     # sklearn framework needs entry point and source directory
     sm_hyperparams["sagemaker_program"] = "bootstrap.py"
     sm_hyperparams["sagemaker_submit_directory"] = source_tarball

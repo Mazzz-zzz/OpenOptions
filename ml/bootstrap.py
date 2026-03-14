@@ -13,7 +13,7 @@ import sys
 subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet",
     "--upgrade", "numpy", "pandas", "pyarrow"])
 subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet",
-    "lightgbm", "numerapi", "pyyaml", "pydantic", "pydantic-settings"])
+    "lightgbm", "catboost", "numerapi", "pyyaml", "pydantic", "pydantic-settings"])
 
 # Parse hyperparameters from SageMaker config
 hp_path = "/opt/ml/input/config/hyperparameters.json"
@@ -24,6 +24,8 @@ feature_set = hp.get("feature_set", "small")
 s3_bucket = hp.get("s3_bucket", "openoptions-ml")
 job_name = hp.get("job_name", "unknown")
 upload = hp.get("upload", "false").lower() == "true"
+model_type = hp.get("model_type", "lgbm")
+neutralization_pct = float(hp.get("neutralization_pct", "50.0"))
 
 # Forward hyperparams as ML_ env vars so MlSettings picks them up
 HP_TO_ENV = {
@@ -44,7 +46,8 @@ for hp_key, env_key in HP_TO_ENV.items():
     if hp_key in hp:
         os.environ[env_key] = hp[hp_key]
 
-print(f"Starting training: feature_set={feature_set}, job_name={job_name}, upload={upload}")
+print(f"Starting training: feature_set={feature_set}, model_type={model_type}, "
+      f"neutralization={neutralization_pct}%, job_name={job_name}, upload={upload}")
 overrides = {k: hp[k] for k in HP_TO_ENV if k in hp}
 if overrides:
     print(f"  Hyperparam overrides: {overrides}")
@@ -84,6 +87,8 @@ metrics = run_training(
     upload=upload,
     progress_callback=progress_callback,
     epoch_callback=epoch_callback,
+    model_type=model_type,
+    neutralization_pct=neutralization_pct,
 )
 
 write_s3_json(s3_bucket, f"jobs/{job_name}/metrics.json", metrics)

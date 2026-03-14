@@ -62,7 +62,7 @@
 
 <div class="chart-container">
 	{#if metrics.length === 0}
-		<p class="empty">No epoch metrics to display</p>
+		<p class="empty">No epoch metrics recorded for this run. Training may still be in progress or the job produced no metrics.</p>
 	{:else}
 		<div bind:this={chartEl} class="chart" style="height: 300px;"></div>
 	{/if}
