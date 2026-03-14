@@ -269,6 +269,7 @@ async def ml_overview(db: Session = Depends(get_db)):
                 "feature_exposure": _fl(r.feature_exposure),
                 "max_drawdown": _fl(r.max_drawdown),
                 "mmc": _fl(r.mmc),
+                "progress_pct": _fl(r.progress_pct),
                 "instance_type": r.instance_type,
                 "cost_usd": _fl(r.cost_usd),
                 "started_at": _ts(r.started_at),

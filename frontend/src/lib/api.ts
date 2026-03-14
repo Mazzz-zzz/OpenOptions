@@ -404,6 +404,7 @@ export interface MlRecentRun {
 	feature_exposure: number | null;
 	max_drawdown: number | null;
 	mmc: number | null;
+	progress_pct: number | null;
 	instance_type: string | null;
 	cost_usd: number | null;
 	started_at: string;

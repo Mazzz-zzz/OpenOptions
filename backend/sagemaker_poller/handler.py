@@ -233,22 +233,7 @@ def _process_run(cur, sm, s3, run_id: int, job_name: str, experiment_id: int = 0
             if hourly_rate:
                 updates["cost_usd"] = round(billable_seconds * hourly_rate / 3600, 4)
 
-    # 3. Update ml_runs row
-    set_clauses = []
-    values = []
-    for col, val in updates.items():
-        if val is not None:
-            set_clauses.append(f"{col} = %s")
-            values.append(val)
-
-    if set_clauses:
-        values.append(run_id)
-        cur.execute(
-            f"UPDATE ml_runs SET {', '.join(set_clauses)} WHERE id = %s",
-            values,
-        )
-
-    # 4. Read and insert epoch metrics
+    # 3. Read and insert epoch metrics
     epoch_keys = _list_epoch_files(s3, S3_BUCKET, f"jobs/{job_name}/epochs/")
 
     # Get existing epochs to avoid duplicates
@@ -257,6 +242,8 @@ def _process_run(cur, sm, s3, run_id: int, job_name: str, experiment_id: int = 0
         (run_id,),
     )
     existing_epochs = {r[0] for r in cur.fetchall()}
+
+    max_epoch = max(existing_epochs) if existing_epochs else 0
 
     for key in epoch_keys:
         data = _read_s3_json(s3, S3_BUCKET, key)
@@ -282,8 +269,36 @@ def _process_run(cur, sm, s3, run_id: int, job_name: str, experiment_id: int = 0
             ),
         )
         existing_epochs.add(epoch)
+        if epoch > max_epoch:
+            max_epoch = epoch
+
+    # Set current_epoch and total_epochs from epoch data + hyperparams
+    if existing_epochs:
+        updates["current_epoch"] = max_epoch
+        hyperparams = resp.get("HyperParameters", {})
+        num_rounds = hyperparams.get("num_rounds")
+        if num_rounds:
+            try:
+                updates["total_epochs"] = int(num_rounds)
+            except (ValueError, TypeError):
+                pass
+
+    # 4. Update ml_runs row
+    set_clauses = []
+    values = []
+    for col, val in updates.items():
+        if val is not None:
+            set_clauses.append(f"{col} = %s")
+            values.append(val)
+
+    if set_clauses:
+        values.append(run_id)
+        cur.execute(
+            f"UPDATE ml_runs SET {', '.join(set_clauses)} WHERE id = %s",
+            values,
+        )
 
     logger.info(
-        "Run %d: sm_status=%s, run_status=%s, epochs=%d",
-        run_id, sm_status, run_status, len(epoch_keys),
+        "Run %d: sm_status=%s, run_status=%s, epochs=%d, current_epoch=%s",
+        run_id, sm_status, run_status, len(epoch_keys), max_epoch,
     )

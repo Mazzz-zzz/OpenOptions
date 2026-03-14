@@ -39,9 +39,21 @@
 
 				<div class="progress-bar-wrapper">
 					<div class="progress-bar">
-						<div class="progress-fill" style="width: {Math.max(2, 0)}%"></div>
+						<div
+							class="progress-fill"
+							class:determinate={run.progress_pct != null && run.progress_pct > 0}
+							style="width: {run.progress_pct != null && run.progress_pct > 0 ? Math.max(2, run.progress_pct) : 0}%"
+						></div>
 					</div>
-					<span class="progress-label">{run.status === 'pending' ? 'Starting...' : 'Training'}</span>
+					<span class="progress-label">
+						{#if run.status === 'pending'}
+							Starting...
+						{:else if run.progress_pct != null && run.progress_pct > 0}
+							{Math.round(run.progress_pct)}%
+						{:else}
+							Training
+						{/if}
+					</span>
 				</div>
 
 				<div class="progress-details">
@@ -139,6 +151,11 @@
 		border-radius: 3px;
 		transition: width 0.5s ease;
 		animation: indeterminate 2s ease-in-out infinite;
+	}
+
+	.progress-fill.determinate {
+		animation: none;
+		margin-left: 0;
 	}
 
 	@keyframes indeterminate {
