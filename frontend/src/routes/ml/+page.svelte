@@ -952,9 +952,13 @@
 	}
 
 	.field-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(140px, 200px));
+		display: flex;
+		flex-wrap: wrap;
 		gap: 0.4rem;
+	}
+
+	.field-grid label {
+		width: 150px;
 	}
 
 	/* Options checkboxes */
