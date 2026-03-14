@@ -1494,12 +1494,15 @@
 	}
 
 	/* ── Deploy tab ── */
-	.deploy-form { width: 100%; }
+	.deploy-form {
+		width: 100%;
+		max-width: 820px;
+	}
 
 	.deploy-grid {
 		display: grid;
-		grid-template-columns: 1fr 300px;
-		gap: 1rem;
+		grid-template-columns: 1fr 260px;
+		gap: 0.75rem;
 		align-items: start;
 	}
 
