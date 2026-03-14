@@ -19,7 +19,7 @@ Also includes a Numerai tournament ML pipeline with multi-target LightGBM traini
 
 | Service | URL |
 |---|---|
-| Frontend | https://main.deszj9mm9xrzu.amplifyapp.com/ |
+| Frontend | https://main.d15kj4g1sx8h43.amplifyapp.com/ |
 | API | https://7ia5onp99c.execute-api.ap-southeast-2.amazonaws.com/prod |
 | Health | https://7ia5onp99c.execute-api.ap-southeast-2.amazonaws.com/prod/health |
 
