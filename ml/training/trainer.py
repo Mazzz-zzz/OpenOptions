@@ -227,6 +227,7 @@ def run_training(
     models = {}
     train_infos = {}
     val_predictions = {}
+    global_epoch_offset = 0
 
     for target_idx, target in enumerate(available_targets):
         # Skip targets with too many NaNs
@@ -244,6 +245,20 @@ def run_training(
         mask = train_df[target].notna()
         train_subset = train_df[mask]
 
+        # Wrap epoch_callback to add target name and global epoch
+        target_epoch_cb = None
+        if epoch_callback:
+            _offset = global_epoch_offset
+            _target = target
+            _tidx = target_idx
+            _total = len(available_targets)
+            def target_epoch_cb(info, _o=_offset, _t=_target, _ti=_tidx, _tot=_total):
+                info["target"] = _t
+                info["target_idx"] = _ti
+                info["total_targets"] = _tot
+                info["global_epoch"] = _o + info["epoch"]
+                epoch_callback(info)
+
         model = create_model(
             model_type=model_type,
             num_leaves=settings.default_num_leaves,
@@ -257,10 +272,11 @@ def run_training(
 
         info = model.fit(
             train_subset, all_features, target, settings.era_col,
-            epoch_callback=epoch_callback,
+            epoch_callback=target_epoch_cb,
         )
         models[target] = model
         train_infos[target] = info
+        global_epoch_offset += info["best_iteration"]
         print(f"    Best iteration: {info['best_iteration']}")
 
         # Validation predictions

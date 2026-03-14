@@ -263,13 +263,15 @@ def _process_run(cur, sm, s3, run_id: int, job_name: str, experiment_id: int = 0
         if not data:
             continue
 
-        epoch = data.get("epoch")
+        # Use global_epoch (continuous across targets) if available, else epoch
+        epoch = data.get("global_epoch", data.get("epoch"))
         if epoch is None or epoch in existing_epochs:
             continue
 
         cur.execute(
             "INSERT INTO ml_epoch_metrics (run_id, epoch, train_loss, val_loss, correlation, sharpe) "
-            "VALUES (%s, %s, %s, %s, %s, %s)",
+            "VALUES (%s, %s, %s, %s, %s, %s) "
+            "ON CONFLICT (run_id, epoch) DO NOTHING",
             (
                 run_id,
                 epoch,

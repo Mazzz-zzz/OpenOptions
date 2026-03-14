@@ -71,8 +71,8 @@ def progress_callback(info):
 
 def epoch_callback(info):
     try:
-        epoch = info.get("epoch", 0)
-        write_s3_json(s3_bucket, f"jobs/{job_name}/epochs/{epoch}.json", info)
+        global_epoch = info.get("global_epoch", info.get("epoch", 0))
+        write_s3_json(s3_bucket, f"jobs/{job_name}/epochs/{global_epoch}.json", info)
     except Exception as e:
         print(f"Warning: epoch write failed: {e}")
 

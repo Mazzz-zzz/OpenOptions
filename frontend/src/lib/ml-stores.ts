@@ -93,6 +93,12 @@ export async function loadMlEnsemble() {
 export const trainingInProgress = writable(false);
 
 let pollInterval: ReturnType<typeof setInterval> | null = null;
+let metricsRefreshCallback: (() => Promise<void>) | null = null;
+
+/** Register a callback to refresh metrics during polling (called from +page). */
+export function setMetricsRefreshCallback(cb: (() => Promise<void>) | null) {
+	metricsRefreshCallback = cb;
+}
 
 export async function triggerTraining(body: TrainRequest) {
 	const result = await api.triggerTraining(body);
@@ -106,10 +112,18 @@ export function startPolling() {
 	pollInterval = setInterval(async () => {
 		try {
 			await loadMlOverview();
+			// Refresh metrics for selected run while training is active
+			if (metricsRefreshCallback) {
+				await metricsRefreshCallback();
+			}
 			const overview = get(mlOverview);
 			if (overview && overview.active_runs === 0) {
 				stopPolling();
 				trainingInProgress.set(false);
+				// Final refresh of metrics
+				if (metricsRefreshCallback) {
+					await metricsRefreshCallback();
+				}
 				// Refresh all data when training completes
 				await Promise.all([
 					mlExperiments.refresh(),

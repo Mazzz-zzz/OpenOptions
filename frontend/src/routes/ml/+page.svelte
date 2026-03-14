@@ -18,7 +18,8 @@
 		loadMlRounds,
 		triggerTraining,
 		startPolling,
-		stopPolling
+		stopPolling,
+		setMetricsRefreshCallback
 	} from '$lib/ml-stores';
 	import MetricCard from '$lib/components/ml/MetricCard.svelte';
 	import LossChart from '$lib/components/ml/LossChart.svelte';
@@ -120,8 +121,20 @@
 		}
 	}
 
+	/** Silently refresh metrics for the selected run (called by polling). */
+	async function refreshSelectedMetrics() {
+		if (selectedRunId === null) return;
+		try {
+			const res = await api.getMlRunMetrics(selectedRunId);
+			epochMetrics = res.data;
+		} catch {
+			// Silent — don't toast on background refresh failures
+		}
+	}
+
 	onMount(async () => {
 		loading = true;
+		setMetricsRefreshCallback(refreshSelectedMetrics);
 		try {
 			await Promise.all([
 				loadMlOverview(),
@@ -142,6 +155,7 @@
 	});
 
 	onDestroy(() => {
+		setMetricsRefreshCallback(null);
 		stopPolling();
 	});
 
