@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from data.features import (
     add_era_stats,
     add_group_aggregates,
+    discover_feature_groups,
     get_feature_columns,
     neutralize_features,
 )
@@ -53,6 +54,26 @@ class TestGetFeatureCols:
     def test_custom_prefix(self, synthetic_data):
         cols = get_feature_columns(synthetic_data, prefix="nonexistent_")
         assert len(cols) == 0
+
+
+class TestDiscoverFeatureGroups:
+    def test_discovers_groups_from_metadata(self, feature_cols, feature_metadata):
+        groups = discover_feature_groups(feature_metadata, feature_cols)
+        assert len(groups) > 0
+        # All returned features should be in active_features
+        for group_name, cols in groups.items():
+            for col in cols:
+                assert col in feature_cols
+
+    def test_filters_to_active_features(self, feature_metadata):
+        active = ["feature_0", "feature_1"]
+        groups = discover_feature_groups(feature_metadata, active)
+        all_features = [c for cols in groups.values() for c in cols]
+        assert set(all_features).issubset(set(active))
+
+    def test_empty_active_features(self, feature_metadata):
+        groups = discover_feature_groups(feature_metadata, [])
+        assert len(groups) == 0
 
 
 class TestNeutralize:

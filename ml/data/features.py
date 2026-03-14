@@ -79,6 +79,36 @@ def get_feature_columns(df: pd.DataFrame, prefix: str = "feature_") -> List[str]
     return [c for c in df.columns if c.startswith(prefix)]
 
 
+def discover_feature_groups(
+    metadata: dict,
+    active_features: List[str],
+) -> Dict[str, List[str]]:
+    """Build feature group dict from Numerai features.json metadata.
+
+    Each feature in features.json has a 'group' field (e.g. 'intelligence',
+    'charisma', 'strength'). This function groups active features by that field.
+
+    Args:
+        metadata: Parsed features.json dict.
+        active_features: List of feature column names currently in use.
+
+    Returns:
+        Dict mapping group name to list of feature column names.
+    """
+    active_set = set(active_features)
+    groups: Dict[str, List[str]] = {}
+
+    feature_stats = metadata.get("feature_stats", {})
+    for feature_name, stats in feature_stats.items():
+        if feature_name not in active_set:
+            continue
+        group = stats.get("group")
+        if group:
+            groups.setdefault(group, []).append(feature_name)
+
+    return groups
+
+
 def neutralize_features(
     df: pd.DataFrame,
     prediction_col: str,

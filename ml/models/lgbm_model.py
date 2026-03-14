@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 import lightgbm as lgb
 import numpy as np
@@ -18,21 +18,23 @@ class LightGBMModel(NumeraiModel):
 
     def __init__(
         self,
-        num_leaves: int = 31,
-        learning_rate: float = 0.01,
-        n_estimators: int = 2000,
+        num_leaves: int = 512,
+        max_depth: int = 8,
+        learning_rate: float = 0.005,
+        n_estimators: int = 10000,
         feature_fraction: float = 0.1,
         bagging_fraction: float = 0.5,
         bagging_freq: int = 1,
-        early_stopping_rounds: int = 100,
+        early_stopping_rounds: int = 200,
         **kwargs,
     ):
+        self.n_estimators = n_estimators
         self.params = {
             "objective": "regression",
             "metric": "mse",
             "num_leaves": num_leaves,
+            "max_depth": max_depth,
             "learning_rate": learning_rate,
-            "n_estimators": n_estimators,
             "feature_fraction": feature_fraction,
             "bagging_fraction": bagging_fraction,
             "bagging_freq": bagging_freq,
@@ -43,12 +45,37 @@ class LightGBMModel(NumeraiModel):
         self._model: Optional[lgb.Booster] = None
         self._feature_names: List[str] = []
 
+    @staticmethod
+    def _make_epoch_callback(
+        user_cb: Callable[[dict], None],
+        every_n: int = 100,
+    ):
+        """Create a LightGBM callback that reports metrics every N rounds."""
+        def callback(env):
+            if env.iteration % every_n == 0:
+                result = {"epoch": env.iteration}
+                for name, metric_name, value, _ in env.evaluation_result_list:
+                    result[f"{name}_{metric_name}"] = value
+                # Map to standard names
+                if "train_l2" in result:
+                    result["train_loss"] = result["train_l2"]
+                if "val_l2" in result:
+                    result["val_loss"] = result["val_l2"]
+                if "train_mse" in result:
+                    result["train_loss"] = result["train_mse"]
+                if "val_mse" in result:
+                    result["val_loss"] = result["val_mse"]
+                user_cb(result)
+        callback.order = 50
+        return callback
+
     def fit(
         self,
         train_df: pd.DataFrame,
         feature_cols: List[str],
         target_col: str = "target",
         era_col: str = "era",
+        epoch_callback: Optional[Callable[[dict], None]] = None,
     ) -> dict:
         """Train LightGBM with era-aware train/val split."""
         self._feature_names = feature_cols
@@ -75,10 +102,13 @@ class LightGBMModel(NumeraiModel):
             lgb.log_evaluation(100),
         ]
 
+        if epoch_callback:
+            callbacks.append(self._make_epoch_callback(epoch_callback, every_n=100))
+
         self._model = lgb.train(
             self.params,
             dtrain,
-            num_boost_round=self.params["n_estimators"],
+            num_boost_round=self.n_estimators,
             valid_sets=[dtrain, dval],
             valid_names=["train", "val"],
             callbacks=callbacks,
@@ -110,6 +140,7 @@ class LightGBMModel(NumeraiModel):
         meta = {
             "model_type": self.model_type,
             "params": self.params,
+            "n_estimators": self.n_estimators,
             "feature_names": self._feature_names,
             "best_iteration": self._model.best_iteration,
         }
@@ -126,6 +157,7 @@ class LightGBMModel(NumeraiModel):
                 meta = json.load(f)
             self._feature_names = meta.get("feature_names", [])
             self.params = meta.get("params", self.params)
+            self.n_estimators = meta.get("n_estimators", self.n_estimators)
 
     @property
     def model_type(self) -> str:

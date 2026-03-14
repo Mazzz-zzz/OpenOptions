@@ -1,10 +1,11 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import {
 		api,
 		type MlRunData,
 		type MlEpochMetric,
-		type MlExperimentData
+		type MlExperimentData,
+		type TrainRequest
 	} from '$lib/api';
 	import { addToast } from '$lib/stores';
 	import {
@@ -14,11 +15,16 @@
 		mlModels,
 		loadMlModels,
 		mlRounds,
-		loadMlRounds
+		loadMlRounds,
+		triggerTraining,
+		startPolling,
+		stopPolling
 	} from '$lib/ml-stores';
 	import MetricCard from '$lib/components/ml/MetricCard.svelte';
 	import LossChart from '$lib/components/ml/LossChart.svelte';
 	import ModelComparisonChart from '$lib/components/ml/ModelComparisonChart.svelte';
+	import TrainConfigModal from '$lib/components/ml/TrainConfigModal.svelte';
+	import TrainingProgress from '$lib/components/ml/TrainingProgress.svelte';
 
 	let activeTab = $state<'overview' | 'experiments' | 'models' | 'rounds'>('overview');
 	let loading = $state(false);
@@ -33,6 +39,10 @@
 	let selectedRunId = $state<number | null>(null);
 	let epochMetrics = $state<MlEpochMetric[]>([]);
 
+	// Training modal state
+	let showTrainModal = $state(false);
+	let trainLoading = $state(false);
+
 	onMount(async () => {
 		loading = true;
 		try {
@@ -42,6 +52,10 @@
 				loadMlModels(),
 				loadMlRounds()
 			]);
+			// Auto-start polling if there are active runs
+			if (($mlOverview?.active_runs ?? 0) > 0) {
+				startPolling();
+			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load ML data';
 			addToast(error!, 'error');
@@ -49,6 +63,34 @@
 			loading = false;
 		}
 	});
+
+	onDestroy(() => {
+		stopPolling();
+	});
+
+	async function handleTrain(config: TrainRequest) {
+		trainLoading = true;
+		try {
+			const result = await triggerTraining(config);
+			showTrainModal = false;
+			addToast(`Training started: Run #${result.run_id}`, 'success');
+			await loadMlOverview();
+		} catch (e) {
+			addToast(e instanceof Error ? e.message : 'Failed to start training', 'error');
+		} finally {
+			trainLoading = false;
+		}
+	}
+
+	async function handleCancelRun(runId: number) {
+		try {
+			await api.cancelTraining(runId);
+			addToast(`Run #${runId} cancelled`, 'success');
+			await loadMlOverview();
+		} catch (e) {
+			addToast(e instanceof Error ? e.message : 'Failed to cancel run', 'error');
+		}
+	}
 
 	async function toggleExperiment(exp: MlExperimentData) {
 		if (expandedExp === exp.id) {
@@ -134,10 +176,20 @@
 <div class="ml-page">
 	<header>
 		<h1>Numerai ML</h1>
-		{#if loading}
-			<span class="loading-indicator">Loading...</span>
-		{/if}
+		<div class="header-actions">
+			{#if loading}
+				<span class="loading-indicator">Loading...</span>
+			{/if}
+			<button class="train-btn" onclick={() => (showTrainModal = true)}>Start Training</button>
+		</div>
 	</header>
+
+	<TrainConfigModal
+		open={showTrainModal}
+		onclose={() => (showTrainModal = false)}
+		onsubmit={handleTrain}
+		loading={trainLoading}
+	/>
 
 	{#if error}
 		<p class="error">{error}</p>
@@ -160,23 +212,33 @@
 				color={($mlOverview?.active_runs ?? 0) > 0 ? 'var(--blue)' : ''}
 			/>
 			<MetricCard
-				label="Best Model Corr"
+				label="Best Correlation"
 				value={$mlOverview?.best_model ? fmt($mlOverview.best_model.correlation, 4) : '\u2014'}
 				sub={$mlOverview?.best_model?.name ?? 'No production model'}
 				color="var(--green)"
+			/>
+			<MetricCard
+				label="Best Sharpe"
+				value={$mlOverview?.best_model ? fmt($mlOverview.best_model.sharpe, 2) : '\u2014'}
+				sub={$mlOverview?.best_model?.name ?? 'No production model'}
+				color="var(--blue)"
+			/>
+			<MetricCard
+				label="Max Drawdown"
+				value={$mlOverview?.best_model ? fmt($mlOverview.best_model.max_drawdown, 4) : '\u2014'}
+				sub={$mlOverview?.best_model?.name ?? 'No production model'}
+				color="var(--red)"
 			/>
 			<MetricCard
 				label="Latest Round"
 				value={$mlOverview?.latest_round ? `#${$mlOverview.latest_round.round_number}` : '\u2014'}
 				sub={$mlOverview?.latest_round?.status ?? 'No submissions'}
 			/>
-			<MetricCard
-				label="Ensemble Score"
-				value={$mlOverview?.ensemble_score !== null && $mlOverview?.ensemble_score !== undefined ? fmt($mlOverview.ensemble_score, 4) : '\u2014'}
-				sub="Active ensemble correlation"
-				color="var(--purple)"
-			/>
 		</div>
+
+		{#if $mlOverview?.recent_runs}
+			<TrainingProgress runs={$mlOverview.recent_runs} oncancel={handleCancelRun} />
+		{/if}
 
 		{#if $mlOverview?.recent_runs && $mlOverview.recent_runs.length > 0}
 			<div class="section">
@@ -188,8 +250,11 @@
 								<th>ID</th>
 								<th>Model Type</th>
 								<th>Status</th>
-								<th class="num">Correlation</th>
+								<th class="num">Corr</th>
+								<th class="num">MMC</th>
 								<th class="num">Sharpe</th>
+								<th class="num">Feat Exp</th>
+								<th class="num">Max DD</th>
 								<th>Started</th>
 							</tr>
 						</thead>
@@ -200,7 +265,10 @@
 									<td>{run.model_type}</td>
 									<td><span class="status-dot" style="color: {statusColor(run.status)}">{run.status}</span></td>
 									<td class="num">{fmt(run.correlation)}</td>
+									<td class="num">{fmt(run.mmc)}</td>
 									<td class="num">{fmt(run.sharpe, 2)}</td>
+									<td class="num">{fmt(run.feature_exposure)}</td>
+									<td class="num">{fmt(run.max_drawdown)}</td>
 									<td class="dim">{run.started_at || '\u2014'}</td>
 								</tr>
 							{/each}
@@ -262,6 +330,7 @@
 																<th>Type</th>
 																<th>Status</th>
 																<th class="num">Corr</th>
+																<th class="num">MMC</th>
 																<th class="num">Sharpe</th>
 																<th class="num">Feat Exp</th>
 																<th class="num">Max DD</th>
@@ -275,6 +344,7 @@
 																	<td>{run.model_type}</td>
 																	<td><span class="status-dot" style="color: {statusColor(run.status)}">{run.status}</span></td>
 																	<td class="num">{fmt(run.correlation)}</td>
+																	<td class="num">{fmt(run.mmc)}</td>
 																	<td class="num">{fmt(run.sharpe, 2)}</td>
 																	<td class="num">{fmt(run.feature_exposure)}</td>
 																	<td class="num">{fmt(run.max_drawdown)}</td>
@@ -316,8 +386,11 @@
 								<th>Type</th>
 								<th>Stage</th>
 								<th class="num">Version</th>
-								<th class="num">Correlation</th>
+								<th class="num">Corr</th>
+								<th class="num">MMC</th>
 								<th class="num">Sharpe</th>
+								<th class="num">Feat Exp</th>
+								<th class="num">Max DD</th>
 								<th>Actions</th>
 							</tr>
 						</thead>
@@ -333,7 +406,10 @@
 									</td>
 									<td class="num">v{model.version}</td>
 									<td class="num">{fmt(model.correlation)}</td>
+									<td class="num">{fmt(model.mmc)}</td>
 									<td class="num">{fmt(model.sharpe, 2)}</td>
+									<td class="num">{fmt(model.feature_exposure)}</td>
+									<td class="num">{fmt(model.max_drawdown)}</td>
 									<td class="actions">
 										{#if model.stage === 'dev'}
 											<button class="promote-btn staging" onclick={() => promoteModel(model.id, 'staging')}>Staging</button>
@@ -405,6 +481,26 @@
 	}
 
 	h1 { font-size: 1.5rem; margin: 0; }
+
+	.header-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+	}
+
+	.train-btn {
+		background: var(--blue);
+		border: none;
+		padding: 0.45rem 1rem;
+		border-radius: 6px;
+		cursor: pointer;
+		color: white;
+		font-size: 0.8rem;
+		font-weight: 600;
+		transition: opacity 0.15s;
+	}
+
+	.train-btn:hover { opacity: 0.85; }
 	h2 { font-size: 1rem; margin: 0 0 0.75rem 0; color: var(--text); }
 
 	.loading-indicator { color: var(--text-secondary); font-size: 0.8rem; }

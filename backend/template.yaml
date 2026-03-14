@@ -70,6 +70,29 @@ Parameters:
   AllowedOrigin:
     Type: String
     Default: '*'
+  SageMakerRoleArn:
+    Type: String
+    Default: ''
+  SageMakerEcrImage:
+    Type: String
+    Default: ''
+  MlS3Bucket:
+    Type: String
+    Default: 'openoptions-ml'
+  MlPollerApiKey:
+    Type: String
+    NoEcho: true
+    Default: ''
+  NumeraiPublicId:
+    Type: String
+    Default: ''
+  NumeraiSecretKey:
+    Type: String
+    NoEcho: true
+    Default: ''
+  NumeraiModelId:
+    Type: String
+    Default: ''
 
 Resources:
   ApiFunction:
@@ -80,6 +103,34 @@ Resources:
       Description: FastAPI backend for OpenOptions
       Architectures:
         - arm64
+      Environment:
+        Variables:
+          SAGEMAKER_ROLE_ARN: !Ref SageMakerRoleArn
+          SAGEMAKER_ECR_IMAGE: !Ref SageMakerEcrImage
+          ML_S3_BUCKET: !Ref MlS3Bucket
+          ML_POLLER_API_KEY: !Ref MlPollerApiKey
+          NUMERAI_PUBLIC_ID: !Ref NumeraiPublicId
+          NUMERAI_SECRET_KEY: !Ref NumeraiSecretKey
+          NUMERAI_MODEL_ID: !Ref NumeraiModelId
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sagemaker:CreateTrainingJob
+                - sagemaker:DescribeTrainingJob
+                - sagemaker:StopTrainingJob
+              Resource: !Sub 'arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:training-job/oo-*'
+            - Effect: Allow
+              Action: iam:PassRole
+              Resource: !Ref SageMakerRoleArn
+              Condition:
+                StringEquals:
+                  iam:PassedToService: sagemaker.amazonaws.com
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+              Resource: !Sub 'arn:aws:s3:::${MlS3Bucket}/*'
       Events:
         ApiGateway:
           Type: HttpApi
@@ -91,6 +142,41 @@ Resources:
     Properties:
       StageName: prod
 
+  # ── Poller Lambda ─────────────────────────────────────────────────
+
+  PollerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handler.handler
+      CodeUri: sagemaker_poller/
+      Description: Polls SageMaker job status and updates RDS
+      Architectures:
+        - arm64
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          ML_S3_BUCKET: !Ref MlS3Bucket
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sagemaker:DescribeTrainingJob
+              Resource: !Sub 'arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:training-job/oo-*'
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:ListBucket
+              Resource:
+                - !Sub 'arn:aws:s3:::${MlS3Bucket}'
+                - !Sub 'arn:aws:s3:::${MlS3Bucket}/*'
+      Events:
+        PollSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 minute)
+            Enabled: true
+
 Outputs:
   ApiUrl:
     Description: API Gateway endpoint URL
@@ -98,3 +184,9 @@ Outputs:
   ApiFunctionArn:
     Description: API Lambda function ARN
     Value: !GetAtt ApiFunction.Arn
+  SageMakerRoleArn:
+    Description: SageMaker execution role ARN
+    Value: !Ref SageMakerRoleArn
+  PollerFunctionArn:
+    Description: Poller Lambda function ARN
+    Value: !GetAtt PollerFunction.Arn

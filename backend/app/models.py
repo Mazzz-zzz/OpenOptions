@@ -165,18 +165,23 @@ class MlRun(Base):
     sharpe = Column(Numeric(10, 6))
     feature_exposure = Column(Numeric(10, 6))
     max_drawdown = Column(Numeric(10, 6))
+    mmc = Column(Numeric(10, 6))
     progress_pct = Column(Numeric(5, 2), default=0)
     current_epoch = Column(Integer, default=0)
     total_epochs = Column(Integer, default=0)
     started_at = Column(DateTime(timezone=True))
     finished_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    sagemaker_job_name = Column(String(120))
+    sagemaker_job_arn = Column(String(256))
+    error_message = Column(String(2000))
 
     experiment = relationship("MlExperiment", back_populates="runs")
     epoch_metrics = relationship("MlEpochMetric", back_populates="run", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("ix_ml_runs_experiment_status", "experiment_id", "status"),
+        Index("ix_ml_runs_sagemaker_job", "sagemaker_job_name"),
     )
 
 
@@ -209,6 +214,9 @@ class MlModel(Base):
     run_id = Column(Integer, ForeignKey("ml_runs.id", ondelete="SET NULL"))
     correlation = Column(Numeric(10, 6))
     sharpe = Column(Numeric(10, 6))
+    feature_exposure = Column(Numeric(10, 6))
+    max_drawdown = Column(Numeric(10, 6))
+    mmc = Column(Numeric(10, 6))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

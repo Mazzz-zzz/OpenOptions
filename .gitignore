@@ -32,3 +32,6 @@ build/
 .pytest_cache/
 *.txt
 frontend-react/
+
+# ML data cache
+ml/data_cache/

@@ -120,6 +120,14 @@ export const api = {
 	getMlEnsemble() {
 		return request<{ data: MlEnsembleData | null }>('GET', '/ml/ensemble');
 	},
+
+	triggerTraining(body: TrainRequest) {
+		return request<TrainResponse>('POST', '/ml/train', body);
+	},
+
+	cancelTraining(runId: number) {
+		return request<{ run_id: number; status: string }>('POST', `/ml/runs/${runId}/cancel`);
+	},
 };
 
 // Types
@@ -373,7 +381,14 @@ export interface IvRankData {
 
 export interface MlOverview {
 	active_runs: number;
-	best_model: { name: string; correlation: number | null; sharpe: number | null } | null;
+	best_model: {
+		name: string;
+		correlation: number | null;
+		sharpe: number | null;
+		feature_exposure: number | null;
+		max_drawdown: number | null;
+		mmc: number | null;
+	} | null;
 	latest_round: { round_number: number; status: string; live_corr: number | null } | null;
 	ensemble_score: number | null;
 	recent_runs: MlRecentRun[];
@@ -385,6 +400,9 @@ export interface MlRecentRun {
 	status: string;
 	correlation: number | null;
 	sharpe: number | null;
+	feature_exposure: number | null;
+	max_drawdown: number | null;
+	mmc: number | null;
 	started_at: string;
 	finished_at: string;
 }
@@ -409,6 +427,7 @@ export interface MlRunData {
 	sharpe: number | null;
 	feature_exposure: number | null;
 	max_drawdown: number | null;
+	mmc: number | null;
 	progress_pct: number | null;
 	current_epoch: number | null;
 	total_epochs: number | null;
@@ -434,6 +453,9 @@ export interface MlModelData {
 	run_id: number | null;
 	correlation: number | null;
 	sharpe: number | null;
+	feature_exposure: number | null;
+	max_drawdown: number | null;
+	mmc: number | null;
 	created_at: string;
 	updated_at: string;
 }
@@ -458,4 +480,20 @@ export interface MlEnsembleData {
 	sharpe: number | null;
 	is_active: boolean;
 	created_at: string;
+}
+
+export interface TrainRequest {
+	experiment_name: string;
+	description?: string;
+	feature_set: string;
+	model_type: string;
+	instance_type: string;
+	hyperparams?: Record<string, unknown>;
+	upload?: boolean;
+}
+
+export interface TrainResponse {
+	run_id: number;
+	experiment_id: number;
+	sagemaker_job_name: string;
 }

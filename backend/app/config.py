@@ -33,6 +33,17 @@ class Settings(BaseSettings):
             return set()
         return {ip.strip() for ip in self.allowed_ips_csv.split(",") if ip.strip()}
 
+    # SageMaker
+    sagemaker_role_arn: str = ""
+    sagemaker_ecr_image: str = ""
+    ml_s3_bucket: str = "openoptions-ml"
+    ml_poller_api_key: str = ""
+
+    # Numerai credentials (passed to SageMaker container for submission upload)
+    numerai_public_id: str = ""
+    numerai_secret_key: str = ""
+    numerai_model_id: str = ""
+
     # General
     environment: str = "development"
     market_tz: str = "America/New_York"

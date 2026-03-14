@@ -1,12 +1,15 @@
 """Download Numerai tournament data via numerapi.
 
-Stubbed — requires valid Numerai credentials to actually download.
+Uses anonymous NumerAPI (no credentials needed for data download).
+Downloads train, validation, live parquets, features.json metadata,
+meta model, and benchmark model predictions (v5.2).
 """
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional
 
 import pandas as pd
 
@@ -15,56 +18,168 @@ from config.settings import get_ml_settings
 
 DATA_DIR = Path(__file__).parent.parent / "data_cache"
 
+# Numerai v5.2 dataset paths (Faith2 update, Dec 2025)
+DATASET_VERSION = "v5.2"
+DATASET_TRAIN = f"{DATASET_VERSION}/train.parquet"
+DATASET_VALIDATION = f"{DATASET_VERSION}/validation.parquet"
+DATASET_LIVE = f"{DATASET_VERSION}/live.parquet"
+DATASET_FEATURES = f"{DATASET_VERSION}/features.json"
+DATASET_META_MODEL = f"{DATASET_VERSION}/meta_model.parquet"
+DATASET_VAL_BENCHMARKS = f"{DATASET_VERSION}/validation_benchmark_models.parquet"
+DATASET_LIVE_BENCHMARKS = f"{DATASET_VERSION}/live_benchmark_models.parquet"
+
+
+def _get_napi():
+    """Get anonymous NumerAPI instance."""
+    import numerapi
+    return numerapi.NumerAPI()
+
 
 def download_current_round(dest: Optional[Path] = None) -> Path:
     """Download the current Numerai tournament dataset.
 
-    Returns path to the downloaded parquet file.
+    No credentials needed — NumerAPI() works anonymously for data download.
+    Downloads train, validation, live parquets, features.json,
+    meta model, and benchmark predictions.
+    Caches by round number to avoid re-downloading.
+
+    Returns path to the data directory.
     """
-    settings = get_ml_settings()
     dest = dest or DATA_DIR
     dest.mkdir(parents=True, exist_ok=True)
 
-    if not settings.numerai_public_id:
-        raise RuntimeError(
-            "Numerai credentials not configured. "
-            "Set ML_NUMERAI_PUBLIC_ID and ML_NUMERAI_SECRET_KEY env vars."
-        )
-
-    import numerapi
-
-    napi = numerapi.NumerAPI(
-        public_id=settings.numerai_public_id,
-        secret_key=settings.numerai_secret_key,
-    )
+    napi = _get_napi()
     current_round = napi.get_current_round()
-    train_path = dest / f"train_r{current_round}.parquet"
-    val_path = dest / f"validation_r{current_round}.parquet"
-    live_path = dest / f"live_r{current_round}.parquet"
 
-    if not train_path.exists():
-        napi.download_dataset("v5.0/train.parquet", str(train_path))
-    if not val_path.exists():
-        napi.download_dataset("v5.0/validation.parquet", str(val_path))
-    if not live_path.exists():
-        napi.download_dataset("v5.0/live.parquet", str(live_path))
+    files = {
+        f"train_r{current_round}.parquet": DATASET_TRAIN,
+        f"validation_r{current_round}.parquet": DATASET_VALIDATION,
+        f"live_r{current_round}.parquet": DATASET_LIVE,
+        f"features_r{current_round}.json": DATASET_FEATURES,
+        f"meta_model_r{current_round}.parquet": DATASET_META_MODEL,
+        f"val_benchmarks_r{current_round}.parquet": DATASET_VAL_BENCHMARKS,
+    }
+
+    for local_name, remote_path in files.items():
+        local_path = dest / local_name
+        if not local_path.exists():
+            print(f"  Downloading {remote_path} -> {local_name}...")
+            napi.download_dataset(remote_path, str(local_path))
+        else:
+            print(f"  Using cached {local_name}")
 
     return dest
 
 
-def load_train_data(path: Optional[Path] = None) -> pd.DataFrame:
-    """Load training data from parquet."""
+def load_feature_metadata(path: Optional[Path] = None) -> dict:
+    """Load features.json metadata (feature sets, groups, etc.).
+
+    Returns the parsed JSON dict with keys like 'feature_sets', 'feature_stats'.
+    """
+    data_dir = path or DATA_DIR
+    files = sorted(data_dir.glob("features_r*.json"))
+    if not files:
+        raise FileNotFoundError(f"No features.json found in {data_dir}")
+
+    with open(files[-1]) as f:
+        return json.load(f)
+
+
+def get_feature_set(metadata: dict, set_name: str = "medium") -> List[str]:
+    """Get feature column names for a named feature set.
+
+    Available sets in Numerai v5: small (42), medium (705), all (2376).
+    """
+    feature_sets = metadata.get("feature_sets", {})
+    if set_name not in feature_sets:
+        available = list(feature_sets.keys())
+        raise ValueError(
+            f"Feature set '{set_name}' not found. Available: {available}"
+        )
+    return feature_sets[set_name]
+
+
+def load_train_data(
+    path: Optional[Path] = None,
+    columns: Optional[List[str]] = None,
+) -> pd.DataFrame:
+    """Load training data from parquet.
+
+    Args:
+        path: Data directory (defaults to DATA_DIR).
+        columns: If provided, only load these columns (saves RAM).
+    """
     data_dir = path or DATA_DIR
     files = sorted(data_dir.glob("train_r*.parquet"))
     if not files:
         raise FileNotFoundError(f"No training data found in {data_dir}")
-    return pd.read_parquet(files[-1])
+    return pd.read_parquet(files[-1], columns=columns)
 
 
-def load_validation_data(path: Optional[Path] = None) -> pd.DataFrame:
-    """Load validation data from parquet."""
+def load_validation_data(
+    path: Optional[Path] = None,
+    columns: Optional[List[str]] = None,
+) -> pd.DataFrame:
+    """Load validation data from parquet.
+
+    Args:
+        path: Data directory (defaults to DATA_DIR).
+        columns: If provided, only load these columns (saves RAM).
+    """
     data_dir = path or DATA_DIR
     files = sorted(data_dir.glob("validation_r*.parquet"))
     if not files:
         raise FileNotFoundError(f"No validation data found in {data_dir}")
+    return pd.read_parquet(files[-1], columns=columns)
+
+
+def load_live_data(
+    path: Optional[Path] = None,
+    columns: Optional[List[str]] = None,
+) -> pd.DataFrame:
+    """Load live data for generating predictions.
+
+    Args:
+        path: Data directory (defaults to DATA_DIR).
+        columns: If provided, only load these columns (saves RAM).
+    """
+    data_dir = path or DATA_DIR
+    files = sorted(data_dir.glob("live_r*.parquet"))
+    if not files:
+        raise FileNotFoundError(f"No live data found in {data_dir}")
+    return pd.read_parquet(files[-1], columns=columns)
+
+
+def load_meta_model(
+    path: Optional[Path] = None,
+) -> Optional[pd.DataFrame]:
+    """Load meta model predictions for validation data.
+
+    The meta model is available from era 1133 onwards.
+    Returns None if not downloaded.
+    """
+    data_dir = path or DATA_DIR
+    files = sorted(data_dir.glob("meta_model_r*.parquet"))
+    if not files:
+        return None
     return pd.read_parquet(files[-1])
+
+
+def load_benchmark_models(
+    path: Optional[Path] = None,
+) -> Optional[pd.DataFrame]:
+    """Load benchmark model predictions for validation data.
+
+    Contains 8 benchmark LightGBM models trained by Numerai on v5.2 data.
+    """
+    data_dir = path or DATA_DIR
+    files = sorted(data_dir.glob("val_benchmarks_r*.parquet"))
+    if not files:
+        return None
+    return pd.read_parquet(files[-1])
+
+
+def get_current_round(dest: Optional[Path] = None) -> int:
+    """Get the current Numerai tournament round number."""
+    napi = _get_napi()
+    return napi.get_current_round()

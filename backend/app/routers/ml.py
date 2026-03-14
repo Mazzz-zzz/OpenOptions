@@ -1,12 +1,17 @@
 """ML / Numerai experiment tracking & model registry endpoints."""
 
-from typing import Optional
+import json
+import logging
+import re
+from datetime import datetime, timezone
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func as sa_func
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.database import get_db
 from app.models import (
     MlEnsemble,
@@ -16,6 +21,8 @@ from app.models import (
     MlRound,
     MlRun,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -46,6 +53,7 @@ class RunOut(BaseModel):
     sharpe: Optional[float] = None
     feature_exposure: Optional[float] = None
     max_drawdown: Optional[float] = None
+    mmc: Optional[float] = None
     progress_pct: Optional[float] = None
     current_epoch: Optional[int] = None
     total_epochs: Optional[int] = None
@@ -77,6 +85,9 @@ class ModelOut(BaseModel):
     run_id: Optional[int] = None
     correlation: Optional[float] = None
     sharpe: Optional[float] = None
+    feature_exposure: Optional[float] = None
+    max_drawdown: Optional[float] = None
+    mmc: Optional[float] = None
     created_at: str
     updated_at: str
 
@@ -94,6 +105,48 @@ class ModelCreate(BaseModel):
 
 class ModelPatch(BaseModel):
     stage: Optional[str] = None
+
+
+class TrainRequest(BaseModel):
+    experiment_name: str
+    description: Optional[str] = None
+    feature_set: str = "medium"
+    model_type: str = "lgbm"
+    instance_type: str = "ml.m5.xlarge"
+    hyperparams: Optional[dict] = None
+    upload: bool = False
+
+
+class ExperimentCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+
+class RunPatch(BaseModel):
+    status: Optional[str] = None
+    progress_pct: Optional[float] = None
+    current_epoch: Optional[int] = None
+    total_epochs: Optional[int] = None
+    correlation: Optional[float] = None
+    sharpe: Optional[float] = None
+    feature_exposure: Optional[float] = None
+    max_drawdown: Optional[float] = None
+    mmc: Optional[float] = None
+    error_message: Optional[str] = None
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+
+
+class EpochMetricIn(BaseModel):
+    epoch: int
+    train_loss: Optional[float] = None
+    val_loss: Optional[float] = None
+    correlation: Optional[float] = None
+    sharpe: Optional[float] = None
+
+
+class MetricsBatch(BaseModel):
+    metrics: List[EpochMetricIn]
 
 
 class RoundOut(BaseModel):
@@ -135,6 +188,15 @@ def _ts(dt) -> str:
 
 def _fl(v) -> Optional[float]:
     return float(v) if v is not None else None
+
+
+def _check_poller_key(x_poller_key: Optional[str] = Header(None)):
+    """Verify poller API key for internal endpoints."""
+    settings = get_settings()
+    if not settings.ml_poller_api_key:
+        return  # no key configured = allow all (dev mode)
+    if x_poller_key != settings.ml_poller_api_key:
+        raise HTTPException(status_code=403, detail="Invalid poller key")
 
 
 # ── Endpoints ────────────────────────────────────────────────────────
@@ -180,6 +242,9 @@ async def ml_overview(db: Session = Depends(get_db)):
             "name": best_model.name,
             "correlation": _fl(best_model.correlation),
             "sharpe": _fl(best_model.sharpe),
+            "feature_exposure": _fl(best_model.feature_exposure),
+            "max_drawdown": _fl(best_model.max_drawdown),
+            "mmc": _fl(best_model.mmc),
         } if best_model else None,
         "latest_round": {
             "round_number": latest_round.round_number,
@@ -194,6 +259,9 @@ async def ml_overview(db: Session = Depends(get_db)):
                 "status": r.status,
                 "correlation": _fl(r.correlation),
                 "sharpe": _fl(r.sharpe),
+                "feature_exposure": _fl(r.feature_exposure),
+                "max_drawdown": _fl(r.max_drawdown),
+                "mmc": _fl(r.mmc),
                 "started_at": _ts(r.started_at),
                 "finished_at": _ts(r.finished_at),
             }
@@ -270,6 +338,7 @@ async def list_runs(experiment_id: int, db: Session = Depends(get_db)):
                 sharpe=_fl(r.sharpe),
                 feature_exposure=_fl(r.feature_exposure),
                 max_drawdown=_fl(r.max_drawdown),
+                mmc=_fl(r.mmc),
                 progress_pct=_fl(r.progress_pct),
                 current_epoch=r.current_epoch,
                 total_epochs=r.total_epochs,
@@ -329,6 +398,9 @@ async def list_models(db: Session = Depends(get_db)):
                 run_id=m.run_id,
                 correlation=_fl(m.correlation),
                 sharpe=_fl(m.sharpe),
+                feature_exposure=_fl(m.feature_exposure),
+                max_drawdown=_fl(m.max_drawdown),
+                mmc=_fl(m.mmc),
                 created_at=_ts(m.created_at),
                 updated_at=_ts(m.updated_at),
             )
@@ -456,3 +528,218 @@ async def get_ensemble(db: Session = Depends(get_db)):
             created_at=_ts(ensemble.created_at),
         )
     }
+
+
+# ── Write endpoints ─────────────────────────────────────────────────
+
+
+@router.post("/ml/train")
+async def trigger_training(body: TrainRequest, db: Session = Depends(get_db)):
+    """Create experiment + run and start a SageMaker training job."""
+    from app.services.sagemaker_service import create_training_job
+
+    # Validate inputs
+    valid_feature_sets = {"small", "medium", "all"}
+    if body.feature_set not in valid_feature_sets:
+        raise HTTPException(status_code=400, detail=f"feature_set must be one of {valid_feature_sets}")
+
+    valid_model_types = {"lgbm"}
+    if body.model_type not in valid_model_types:
+        raise HTTPException(status_code=400, detail=f"model_type must be one of {valid_model_types}")
+
+    settings = get_settings()
+    if not settings.sagemaker_role_arn or not settings.sagemaker_ecr_image:
+        raise HTTPException(status_code=503, detail="SageMaker not configured")
+
+    # Find or create experiment
+    exp = db.query(MlExperiment).filter(MlExperiment.name == body.experiment_name).first()
+    if not exp:
+        exp = MlExperiment(name=body.experiment_name, description=body.description)
+        db.add(exp)
+        db.flush()
+
+    # Create run
+    hyperparams = body.hyperparams or {}
+    run = MlRun(
+        experiment_id=exp.id,
+        model_type=body.model_type,
+        status="pending",
+        hyperparams_json=json.dumps(hyperparams) if hyperparams else None,
+    )
+    db.add(run)
+    db.flush()
+
+    # Build job name: oo-{experiment}-{run_id}-{timestamp}
+    safe_name = re.sub(r"[^a-zA-Z0-9-]", "-", body.experiment_name)[:40]
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    job_name = f"oo-{safe_name}-{run.id}-{ts}"
+
+    try:
+        job_arn = create_training_job(
+            job_name=job_name,
+            hyperparams=hyperparams,
+            instance_type=body.instance_type,
+            feature_set=body.feature_set,
+            upload=body.upload,
+        )
+        run.sagemaker_job_name = job_name
+        run.sagemaker_job_arn = job_arn
+        run.status = "pending"
+        db.commit()
+    except Exception as e:
+        run.status = "failed"
+        run.error_message = str(e)[:2000]
+        db.commit()
+        logger.exception("Failed to create SageMaker job")
+        raise HTTPException(status_code=500, detail=f"Failed to start training: {e}")
+
+    return {
+        "run_id": run.id,
+        "experiment_id": exp.id,
+        "sagemaker_job_name": job_name,
+    }
+
+
+@router.post("/ml/experiments")
+async def create_experiment(body: ExperimentCreate, db: Session = Depends(get_db)):
+    """Create a new experiment."""
+    existing = db.query(MlExperiment).filter(MlExperiment.name == body.name).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="Experiment name already exists")
+
+    exp = MlExperiment(name=body.name, description=body.description)
+    db.add(exp)
+    db.commit()
+    db.refresh(exp)
+
+    return ExperimentOut(
+        id=exp.id,
+        name=exp.name,
+        description=exp.description,
+        status=exp.status,
+        created_at=_ts(exp.created_at),
+        run_count=0,
+        best_corr=None,
+    )
+
+
+@router.patch("/ml/runs/{run_id}")
+async def update_run(
+    run_id: int,
+    body: RunPatch,
+    db: Session = Depends(get_db),
+    _auth: None = Depends(_check_poller_key),
+):
+    """Update run progress/status/metrics (called by poller Lambda)."""
+    run = db.query(MlRun).filter(MlRun.id == run_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    valid_statuses = {"pending", "running", "completed", "failed"}
+
+    if body.status is not None:
+        if body.status not in valid_statuses:
+            raise HTTPException(status_code=400, detail=f"Status must be one of {valid_statuses}")
+        run.status = body.status
+    if body.progress_pct is not None:
+        run.progress_pct = body.progress_pct
+    if body.current_epoch is not None:
+        run.current_epoch = body.current_epoch
+    if body.total_epochs is not None:
+        run.total_epochs = body.total_epochs
+    if body.correlation is not None:
+        run.correlation = body.correlation
+    if body.sharpe is not None:
+        run.sharpe = body.sharpe
+    if body.feature_exposure is not None:
+        run.feature_exposure = body.feature_exposure
+    if body.max_drawdown is not None:
+        run.max_drawdown = body.max_drawdown
+    if body.mmc is not None:
+        run.mmc = body.mmc
+    if body.error_message is not None:
+        run.error_message = body.error_message[:2000]
+    if body.started_at is not None:
+        run.started_at = body.started_at
+    if body.finished_at is not None:
+        run.finished_at = body.finished_at
+
+    db.commit()
+    db.refresh(run)
+
+    return RunOut(
+        id=run.id,
+        experiment_id=run.experiment_id,
+        model_type=run.model_type,
+        status=run.status,
+        hyperparams_json=run.hyperparams_json,
+        correlation=_fl(run.correlation),
+        sharpe=_fl(run.sharpe),
+        feature_exposure=_fl(run.feature_exposure),
+        max_drawdown=_fl(run.max_drawdown),
+        progress_pct=_fl(run.progress_pct),
+        current_epoch=run.current_epoch,
+        total_epochs=run.total_epochs,
+        started_at=_ts(run.started_at),
+        finished_at=_ts(run.finished_at),
+        created_at=_ts(run.created_at),
+    )
+
+
+@router.post("/ml/runs/{run_id}/metrics")
+async def batch_insert_metrics(
+    run_id: int,
+    body: MetricsBatch,
+    db: Session = Depends(get_db),
+    _auth: None = Depends(_check_poller_key),
+):
+    """Batch-insert epoch metrics (called by poller Lambda)."""
+    run = db.query(MlRun).filter(MlRun.id == run_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    inserted = 0
+    for m in body.metrics:
+        # Skip if epoch already exists
+        existing = db.query(MlEpochMetric).filter(
+            MlEpochMetric.run_id == run_id,
+            MlEpochMetric.epoch == m.epoch,
+        ).first()
+        if existing:
+            continue
+
+        metric = MlEpochMetric(
+            run_id=run_id,
+            epoch=m.epoch,
+            train_loss=m.train_loss,
+            val_loss=m.val_loss,
+            correlation=m.correlation,
+            sharpe=m.sharpe,
+        )
+        db.add(metric)
+        inserted += 1
+
+    db.commit()
+    return {"inserted": inserted}
+
+
+@router.post("/ml/runs/{run_id}/cancel")
+async def cancel_run(run_id: int, db: Session = Depends(get_db)):
+    """Cancel a running training job."""
+    run = db.query(MlRun).filter(MlRun.id == run_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    if run.status not in ("pending", "running"):
+        raise HTTPException(status_code=400, detail="Run is not active")
+
+    if run.sagemaker_job_name:
+        from app.services.sagemaker_service import stop_job
+        stop_job(run.sagemaker_job_name)
+
+    run.status = "failed"
+    run.error_message = "Cancelled by user"
+    run.finished_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return {"run_id": run.id, "status": "failed"}

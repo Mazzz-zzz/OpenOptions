@@ -1,6 +1,8 @@
-# OpenOptions — Options Mispricing Tracker
+# OpenOptions — Options Mispricing Tracker + Numerai ML
 
-Real-time options mispricing detection across crypto (Deribit) and US equities (Tradier). Fits SVI volatility surfaces per expiry, computes Black-Scholes greeks, and flags contracts where market IV diverges from the fitted surface.
+Real-time options mispricing detection across crypto (Deribit) and US equities/futures (Tastytrade). Fits SVI volatility surfaces per expiry, computes Black-Scholes greeks, and flags contracts where market IV diverges from the fitted surface.
+
+Also includes a Numerai tournament ML pipeline with multi-target LightGBM training, SageMaker integration, and a live training dashboard.
 
 ## Architecture
 
@@ -9,7 +11,8 @@ Real-time options mispricing detection across crypto (Deribit) and US equities (
 | Frontend | SvelteKit 5 (Svelte 5 runes, static adapter) on AWS Amplify |
 | Backend | FastAPI on AWS Lambda (via Mangum + SAM) |
 | Database | PostgreSQL 16 on AWS RDS (db.t4g.micro) |
-| Data Sources | Deribit REST API (crypto), Tradier REST API (equities) |
+| Data Sources | Deribit REST API (crypto), Tastytrade REST API (equities/futures) |
+| ML Training | LightGBM on SageMaker, dashboard monitoring |
 | Region | ap-southeast-2 (Sydney) |
 
 ## Live URLs
@@ -47,17 +50,29 @@ backend/
 frontend/
   src/
     routes/
-      +layout.svelte     # Nav bar (Dashboard, Vol Surface, Contracts)
+      +layout.svelte     # Nav bar (Dashboard, Vol Surface, Contracts, ML)
       +page.svelte       # Dashboard: fetch buttons + alert table
       contracts/         # Contract browser with watchlist, sorting, filtering
       surface/           # Vol surface with 3D/2D views, C/P toggle
+      ml/                # ML dashboard: training, experiments, models, rounds
     lib/
       api.ts             # Typed API client + interfaces
       stores.ts          # Svelte stores (alerts, surface, contracts)
+      ml-stores.ts       # ML stores (experiments, models, training triggers)
       components/
         AlertTable.svelte  # Sortable/filterable alert table with all greeks
         FetchButton.svelte # Trigger fetch with loading state
         VolSurface.svelte  # Plotly 3D surface + 2D IV smile
+        ml/                # ML components (TrainConfigModal, TrainingProgress)
+
+ml/                        # Numerai ML training pipeline (see ml/README.md)
+  config/settings.py       # MlSettings (Pydantic, env prefix ML_)
+  data/download.py         # numerapi data download + caching
+  data/features.py         # Feature engineering (era stats, groups, neutralization)
+  models/lgbm_model.py     # LightGBM with era-aware CV + epoch callbacks
+  training/trainer.py      # Full pipeline (download → train → submit)
+  sagemaker/launch_job.py  # Package code + launch SageMaker training job
+  bootstrap.py             # SageMaker entry point
 ```
 
 ## How It Works
@@ -198,14 +213,62 @@ Test coverage:
 - **test_tradier.py** (5) — Expiration/chain parsing, edge cases
 - **test_api.py** (20) — All endpoints: alerts CRUD + pagination, contracts + watchlist, snapshots, surface
 - **test_fetch.py** (4) — Fetch pipeline integration
+- **test_ml.py** (19) — ML endpoints: experiments, models, rounds, overview
+- **ml/tests/** (27) — Feature engineering, LightGBM training, validation metrics, submission
 
 ## Deployment
 
 See `DEPLOYMENT_STATUS.md` for full infrastructure details and redeployment commands.
 
+## ML Pipeline (Numerai)
+
+A complete training framework for the Numerai Classic tournament. See [`ml/README.md`](ml/README.md) for full details.
+
+### Pipeline
+
+1. **Download** Numerai v5 data via numerapi (anonymous, ~6GB)
+2. **Feature engineering** — era stats (demeaning, z-score), group aggregates
+3. **Multi-target training** — 6 LightGBM models (target + 5 variants)
+4. **Ensemble** — rank-average across target models
+5. **Neutralization** — OLS residualization against top 50 features
+6. **Validation** — per-era correlation, Sharpe ratio, max drawdown, feature exposure
+7. **Submission** — rank-normalized CSV, optional upload to Numerai
+
+### SageMaker Integration
+
+Training runs on SageMaker (ml.m5.xlarge, ~$0.40/run). The dashboard provides:
+- **Start Training** button with experiment name, feature set, instance type selection
+- **Live progress** — step-level progress bar and epoch-level loss charts
+- **Experiment tracking** — compare runs across experiments
+
+Architecture: SageMaker writes progress to S3 → Poller Lambda (1/min) syncs to RDS → API serves to dashboard (5s poll).
+
+```bash
+# Launch from CLI
+cd ml && python3 sagemaker/launch_job.py --feature-set small
+
+# Or from the dashboard at /ml tab → Start Training
+```
+
+### ML API Endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/ml/overview` | Dashboard summary (active runs, best model) |
+| GET | `/api/ml/experiments` | List experiments with run counts |
+| GET | `/api/ml/runs/{id}/metrics` | Epoch-level train/val loss data |
+| POST | `/api/ml/train` | Start a SageMaker training job |
+| POST | `/api/ml/runs/{id}/cancel` | Cancel a running job |
+
+### ML Tests
+
+```bash
+cd ml && python3 -m pytest tests/ -v   # 27 tests
+```
+
 ## Known Limitations
 
-- **Tradier API key not configured** — US equity fetches return 503 until a key is set
+- **Local ML training needs ~16GB RAM** — use SageMaker for the full dataset
 - **No scheduled fetching** — data collection is user-triggered only (no EventBridge/cron yet)
 - **No authentication** — endpoints are publicly accessible
 - **No OI/volume data** — Deribit provides these but we don't store them yet

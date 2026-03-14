@@ -6,6 +6,7 @@ import {
 	type MlModelData,
 	type MlRoundData,
 	type MlEnsembleData,
+	type TrainRequest,
 } from './api';
 
 // ── Overview ────────────────────────────────────────────────────────
@@ -85,4 +86,45 @@ export const mlEnsemble = writable<MlEnsembleData | null>(null);
 export async function loadMlEnsemble() {
 	const res = await api.getMlEnsemble();
 	mlEnsemble.set(res.data);
+}
+
+// ── Training trigger + polling ──────────────────────────────────────
+
+export const trainingInProgress = writable(false);
+
+let pollInterval: ReturnType<typeof setInterval> | null = null;
+
+export async function triggerTraining(body: TrainRequest) {
+	const result = await api.triggerTraining(body);
+	trainingInProgress.set(true);
+	startPolling();
+	return result;
+}
+
+export function startPolling() {
+	if (pollInterval) return;
+	pollInterval = setInterval(async () => {
+		try {
+			await loadMlOverview();
+			const overview = get(mlOverview);
+			if (overview && overview.active_runs === 0) {
+				stopPolling();
+				trainingInProgress.set(false);
+				// Refresh all data when training completes
+				await Promise.all([
+					mlExperiments.refresh(),
+					loadMlModels(),
+				]);
+			}
+		} catch {
+			// Ignore polling errors
+		}
+	}, 5000);
+}
+
+export function stopPolling() {
+	if (pollInterval) {
+		clearInterval(pollInterval);
+		pollInterval = null;
+	}
 }

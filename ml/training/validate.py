@@ -98,17 +98,98 @@ def feature_exposure(
     return float(np.mean(max_exposures)) if max_exposures else 0.0
 
 
+def meta_model_contribution(
+    df: pd.DataFrame,
+    prediction_col: str = "prediction",
+    meta_model_col: str = "numerai_meta_model",
+    target_col: str = "target",
+    era_col: str = "era",
+) -> float:
+    """Compute MMC (Meta-Model Contribution) per era, then average.
+
+    MMC measures how much your predictions contribute beyond the meta model.
+    It orthogonalizes your predictions against the meta model, then correlates
+    the residual with the target.
+    """
+    def _gaussianize(s):
+        """Rank to Gaussian (percentile -> inverse normal CDF)."""
+        ranked = stats.rankdata(s)
+        return stats.norm.ppf(ranked / (len(ranked) + 1))
+
+    def _mmc_era(group):
+        if len(group) < 10:
+            return np.nan
+        preds = _gaussianize(group[prediction_col].values)
+        mm = _gaussianize(group[meta_model_col].values)
+        target = _gaussianize(group[target_col].values)
+
+        # Orthogonalize predictions w.r.t. meta model
+        dot = np.dot(preds, mm)
+        mm_norm = np.dot(mm, mm)
+        if mm_norm == 0:
+            return np.nan
+        preds_ortho = preds - mm * (dot / mm_norm)
+
+        # Correlate orthogonal component with target
+        return np.corrcoef(preds_ortho, target)[0, 1]
+
+    era_mmcs = df.groupby(era_col).apply(_mmc_era)
+    return float(era_mmcs.mean())
+
+
+def benchmark_comparison(
+    df: pd.DataFrame,
+    prediction_col: str = "prediction",
+    benchmark_cols: List[str] = None,
+    target_col: str = "target",
+    era_col: str = "era",
+) -> Dict[str, Dict[str, float]]:
+    """Compare our model against Numerai benchmark models.
+
+    Returns a dict of {benchmark_name: {correlation, sharpe}} so we can
+    see where we stand relative to Numerai's own models.
+    """
+    if not benchmark_cols:
+        return {}
+
+    results = {}
+    for bm_col in benchmark_cols:
+        if bm_col not in df.columns:
+            continue
+        bm_corr = mean_correlation(df, bm_col, target_col, era_col)
+        bm_sharpe = sharpe_ratio(df, bm_col, target_col, era_col)
+        results[bm_col] = {"correlation": bm_corr, "sharpe": bm_sharpe}
+
+    return results
+
+
 def compute_all_metrics(
     df: pd.DataFrame,
     prediction_col: str = "prediction",
     target_col: str = "target",
     era_col: str = "era",
     feature_cols: Optional[List[str]] = None,
+    meta_model_col: Optional[str] = None,
+    benchmark_cols: Optional[List[str]] = None,
 ) -> dict:
     """Compute all Numerai validation metrics."""
-    return {
+    metrics = {
         "correlation": mean_correlation(df, prediction_col, target_col, era_col),
         "sharpe": sharpe_ratio(df, prediction_col, target_col, era_col),
         "max_drawdown": max_drawdown(df, prediction_col, target_col, era_col),
         "feature_exposure": feature_exposure(df, prediction_col, feature_cols, era_col),
     }
+
+    # MMC if meta model is available
+    if meta_model_col and meta_model_col in df.columns:
+        metrics["mmc"] = meta_model_contribution(
+            df, prediction_col, meta_model_col, target_col, era_col,
+        )
+
+    # Benchmark comparison
+    if benchmark_cols:
+        metrics["vs_benchmarks"] = benchmark_comparison(
+            df, prediction_col, benchmark_cols, target_col, era_col,
+        )
+
+    return metrics
