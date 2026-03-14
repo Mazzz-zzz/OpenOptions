@@ -382,163 +382,126 @@
 	<!-- Deploy Tab -->
 	{:else if activeTab === 'deploy'}
 		<form class="deploy-form" onsubmit={(e) => { e.preventDefault(); handleDeploy(); }}>
-			<div class="deploy-grid">
-				<div class="deploy-section deploy-main">
-					<h2>Run Configuration</h2>
-					<div class="field-grid">
-						<label>
-							<span>Experiment Name</span>
-							<input type="text" bind:value={deployExpName} placeholder="e.g. baseline-v3" required />
-						</label>
-						<label>
-							<span>Description</span>
-							<input type="text" bind:value={deployDescription} placeholder="Optional" />
-						</label>
-					</div>
-					<div class="field-grid three-col">
-						<label>
-							<span>Feature Set</span>
-							<select bind:value={deployFeatureSet}>
-								<option value="small">Small (42 features)</option>
-								<option value="medium">Medium (705 features)</option>
-								<option value="all">All (2376 features)</option>
-							</select>
-						</label>
-						<label>
-							<span>Model Type</span>
-							<select bind:value={deployModelType}>
-								<option value="lgbm">LightGBM</option>
-								<option value="catboost">CatBoost</option>
-							</select>
-						</label>
-						<label>
-							<span>Instance Type</span>
-							<select bind:value={deployInstanceType}>
-								{#each Object.entries(instanceRates) as [type, info]}
-									<option value={type}>{type} ({info.spec})</option>
-								{/each}
-							</select>
-						</label>
-					</div>
+			<div class="deploy-section">
+				<h2>Run Configuration</h2>
+				<div class="field-grid">
+					<label>
+						<span>Experiment Name</span>
+						<input type="text" bind:value={deployExpName} placeholder="e.g. baseline-v3" required />
+					</label>
+					<label>
+						<span>Description</span>
+						<input type="text" bind:value={deployDescription} placeholder="Optional" />
+					</label>
+					<label>
+						<span>Feature Set</span>
+						<select bind:value={deployFeatureSet}>
+							<option value="small">Small (42 features)</option>
+							<option value="medium">Medium (705 features)</option>
+							<option value="all">All (2376 features)</option>
+						</select>
+					</label>
+					<label>
+						<span>Model Type</span>
+						<select bind:value={deployModelType}>
+							<option value="lgbm">LightGBM</option>
+							<option value="catboost">CatBoost</option>
+						</select>
+					</label>
+					<label>
+						<span>Instance Type</span>
+						<select bind:value={deployInstanceType}>
+							{#each Object.entries(instanceRates) as [type, info]}
+								<option value={type}>{type} ({info.spec})</option>
+							{/each}
+						</select>
+					</label>
+				</div>
+			</div>
 
-					<h2>Model Parameters</h2>
-					<div class="field-grid three-col">
+			<div class="deploy-section">
+				<h2>Model Parameters</h2>
+				<div class="field-grid">
+					<label>
+						<span>{deployModelType === 'catboost' ? 'Iterations' : 'Num Rounds'}</span>
+						<input type="number" bind:value={lgbmNumRounds} min="100" max="50000" step="100" />
+					</label>
+					<label>
+						<span>Learning Rate</span>
+						<input type="number" bind:value={lgbmLearningRate} min="0.001" max="0.1" step="0.001" />
+					</label>
+					<label>
+						<span>Max Depth</span>
+						<input type="number" bind:value={lgbmMaxDepth} min="-1" max="20" />
+					</label>
+					<label>
+						<span>Early Stopping</span>
+						<input type="number" bind:value={lgbmEarlyStopping} min="10" max="1000" step="10" />
+					</label>
+					<label>
+						<span>Max Training Eras</span>
+						<input type="number" bind:value={deployMaxTrainEras} min="50" max="2000" step="50" />
+					</label>
+					{#if deployModelType === 'lgbm'}
 						<label>
-							<span>{deployModelType === 'catboost' ? 'Iterations' : 'Num Rounds'}</span>
-							<input type="number" bind:value={lgbmNumRounds} min="100" max="50000" step="100" />
+							<span>Num Leaves</span>
+							<input type="number" bind:value={lgbmNumLeaves} min="16" max="4096" step="16" />
 						</label>
 						<label>
-							<span>Learning Rate</span>
-							<input type="number" bind:value={lgbmLearningRate} min="0.001" max="0.1" step="0.001" />
+							<span>Feature Fraction</span>
+							<input type="number" bind:value={lgbmFeatureFraction} min="0.01" max="1.0" step="0.01" />
 						</label>
 						<label>
-							<span>Max Depth</span>
-							<input type="number" bind:value={lgbmMaxDepth} min="-1" max="20" />
+							<span>Bagging Fraction</span>
+							<input type="number" bind:value={lgbmBaggingFraction} min="0.1" max="1.0" step="0.05" />
 						</label>
-						<label>
-							<span>Early Stopping</span>
-							<input type="number" bind:value={lgbmEarlyStopping} min="10" max="1000" step="10" />
-						</label>
-						<label>
-							<span>Max Training Eras</span>
-							<input type="number" bind:value={deployMaxTrainEras} min="50" max="2000" step="50" />
-						</label>
-						{#if deployModelType === 'lgbm'}
-							<label>
-								<span>Num Leaves</span>
-								<input type="number" bind:value={lgbmNumLeaves} min="16" max="4096" step="16" />
-							</label>
-							<label>
-								<span>Feature Fraction</span>
-								<input type="number" bind:value={lgbmFeatureFraction} min="0.01" max="1.0" step="0.01" />
-							</label>
-							<label>
-								<span>Bagging Fraction</span>
-								<input type="number" bind:value={lgbmBaggingFraction} min="0.1" max="1.0" step="0.05" />
-							</label>
-						{/if}
-					</div>
+					{/if}
+				</div>
+			</div>
+
+			<div class="deploy-section">
+				<h2>Options</h2>
+				<div class="option-grid">
+					<label class="option-check">
+						<input type="checkbox" bind:checked={deployMultiTarget} />
+						<span>Multi-target ensemble (all 8 targets)</span>
+					</label>
+					<label class="option-check">
+						<input type="checkbox" bind:checked={deployEnableEraStats} />
+						<span>Era statistics</span>
+					</label>
+					<label class="option-check">
+						<input type="checkbox" bind:checked={deployEnableGroupAggs} />
+						<span>Group aggregates</span>
+					</label>
+					<label class="option-check">
+						<input type="checkbox" bind:checked={deployUpload} />
+						<span>Upload to Numerai</span>
+					</label>
 				</div>
 
-				<div class="deploy-sidebar">
-					<div class="deploy-section">
-						<h2>Options</h2>
-						<div class="toggle-stack">
-							<label class="toggle-label">
-								<span class="toggle-switch" class:on={deployMultiTarget}></span>
-								<input type="checkbox" class="sr-only" bind:checked={deployMultiTarget} />
-								<div>
-									<span class="toggle-title">Multi-Target Training</span>
-									<span class="toggle-desc">Train on all 8 targets, ensemble via rank-average</span>
-								</div>
-							</label>
-							<label class="toggle-label">
-								<span class="toggle-switch" class:on={deployEnableEraStats}></span>
-								<input type="checkbox" class="sr-only" bind:checked={deployEnableEraStats} />
-								<div>
-									<span class="toggle-title">Era Statistics</span>
-									<span class="toggle-desc">Per-era mean/std of top features</span>
-								</div>
-							</label>
-							<label class="toggle-label">
-								<span class="toggle-switch" class:on={deployEnableGroupAggs}></span>
-								<input type="checkbox" class="sr-only" bind:checked={deployEnableGroupAggs} />
-								<div>
-									<span class="toggle-title">Group Aggregates</span>
-									<span class="toggle-desc">Feature group means from feature_groups.yaml</span>
-								</div>
-							</label>
-							<label class="toggle-label">
-								<span class="toggle-switch" class:on={deployUpload}></span>
-								<input type="checkbox" class="sr-only" bind:checked={deployUpload} />
-								<div>
-									<span class="toggle-title">Upload to Numerai</span>
-									<span class="toggle-desc">Auto-submit predictions after training</span>
-								</div>
-							</label>
-						</div>
-					</div>
-
-					<div class="deploy-section">
-						<h2>Neutralization</h2>
-						<div class="neutralization-control">
-							<div class="neutralization-header">
-								<span class="neutralization-value">{deployNeutralizationPct}%</span>
-							</div>
-							<input type="range" bind:value={deployNeutralizationPct} min="0" max="100" step="5" />
-							<div class="neutralization-labels">
-								<span>None</span>
-								<span>Full</span>
-							</div>
-						</div>
-					</div>
-
-					<div class="deploy-section deploy-launch-section">
-						{#if estimatedCost}
-							<div class="cost-estimate">
-								<div class="cost-row">
-									<span class="cost-label">Est. time</span>
-									<span class="cost-value">~{estimatedCost.minutes} min</span>
-								</div>
-								<div class="cost-row">
-									<span class="cost-label">Est. cost</span>
-									<span class="cost-value cost-highlight">${estimatedCost.low} &ndash; ${estimatedCost.high}</span>
-								</div>
-								<div class="cost-row">
-									<span class="cost-label">Rate</span>
-									<span class="cost-value">${instanceRates[deployInstanceType]?.rate}/hr</span>
-								</div>
-							</div>
-						{/if}
-						<button type="submit" class="launch-btn" disabled={!deployExpName.trim() || deployLoading}>
-							{#if deployLoading}
-								<span class="launch-spinner"></span> Launching...
-							{:else}
-								Launch Training
-							{/if}
-						</button>
-					</div>
+				<div class="neut-inline">
+					<span class="neut-label">Neutralization</span>
+					<input type="range" bind:value={deployNeutralizationPct} min="0" max="100" step="5" />
+					<span class="neut-value">{deployNeutralizationPct}%</span>
 				</div>
+			</div>
+
+			<div class="deploy-section deploy-launch-section">
+				{#if estimatedCost}
+					<div class="cost-inline">
+						<span>~{estimatedCost.minutes} min</span>
+						<span class="cost-highlight">${estimatedCost.low}&ndash;${estimatedCost.high}</span>
+						<span>${instanceRates[deployInstanceType]?.rate}/hr</span>
+					</div>
+				{/if}
+				<button type="submit" class="launch-btn" disabled={!deployExpName.trim() || deployLoading}>
+					{#if deployLoading}
+						<span class="launch-spinner"></span> Launching...
+					{:else}
+						Launch Training
+					{/if}
+				</button>
 			</div>
 		</form>
 
@@ -935,48 +898,33 @@
 
 	/* ── Deploy tab ── */
 	.deploy-form {
-		width: 100%;
-		max-width: 720px;
-	}
-
-	.deploy-grid {
-		display: grid;
-		grid-template-columns: 1fr 240px;
-		gap: 0.75rem;
-		align-items: start;
+		max-width: 540px;
+		display: flex;
+		flex-direction: column;
+		gap: 0.6rem;
 	}
 
 	.deploy-section {
 		background: var(--bg-card);
 		border: 1px solid var(--border-light);
-		border-radius: 10px;
-		padding: 1.25rem 1.5rem;
-		box-shadow: var(--shadow-sm);
+		border-radius: 8px;
+		padding: 0.75rem 0.85rem;
 	}
 
-	.deploy-main { margin-bottom: 0; }
-	.deploy-sidebar { display: flex; flex-direction: column; gap: 1rem; }
-
 	.deploy-form h2 {
-		font-size: 0.75rem;
+		font-size: 0.62rem;
 		text-transform: uppercase;
 		letter-spacing: 0.06em;
 		color: var(--text-secondary);
-		margin: 0 0 0.75rem 0;
-		padding-bottom: 0.5rem;
-		border-bottom: 1px solid var(--border-light);
-	}
-
-	.deploy-form h2:not(:first-child) {
-		margin-top: 1.25rem;
+		margin: 0 0 0.5rem 0;
 	}
 
 	.deploy-form label > span:first-child {
 		display: block;
-		font-size: 0.7rem;
+		font-size: 0.6rem;
 		font-weight: 600;
 		color: var(--text-muted);
-		margin-bottom: 0.35rem;
+		margin-bottom: 0.15rem;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 	}
@@ -985,21 +933,14 @@
 	.deploy-form input[type="number"],
 	.deploy-form select {
 		width: 100%;
-		padding: 0.5rem 0.75rem;
+		padding: 0.3rem 0.4rem;
 		background: var(--bg-input);
 		border: 1px solid var(--border);
-		border-radius: 6px;
+		border-radius: 4px;
 		color: var(--text);
-		font-size: 0.8rem;
+		font-size: 0.72rem;
 		font-family: 'SF Mono', 'Consolas', monospace;
 		transition: border-color 0.15s;
-		min-height: 0;
-	}
-
-	.deploy-form input[type="range"] {
-		width: 100%;
-		accent-color: var(--blue);
-		margin-top: 0.35rem;
 	}
 
 	.deploy-form input:focus,
@@ -1011,156 +952,82 @@
 
 	.field-grid {
 		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 1rem;
+		grid-template-columns: 1fr 1fr 1fr;
+		gap: 0.4rem;
 	}
 
-	.field-grid.three-col { grid-template-columns: 1fr 1fr 1fr; gap: 1rem; }
-
-	/* Toggle switches */
-	.toggle-stack {
+	/* Options checkboxes */
+	.option-grid {
 		display: flex;
 		flex-direction: column;
-		gap: 0.5rem;
+		gap: 0.15rem;
 	}
 
-	.toggle-label {
+	.option-check {
 		display: flex;
-		align-items: flex-start;
-		gap: 0.75rem;
+		align-items: center;
+		gap: 0.4rem;
 		cursor: pointer;
-		padding: 0.65rem;
-		border-radius: 8px;
-		transition: background 0.15s;
-	}
-
-	.toggle-label:hover { background: var(--bg-input); }
-
-	.sr-only {
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		padding: 0;
-		margin: -1px;
-		overflow: hidden;
-		clip: rect(0, 0, 0, 0);
-		white-space: nowrap;
-		border-width: 0;
-	}
-
-	.toggle-switch {
-		position: relative;
-		flex-shrink: 0;
-		width: 2.25rem;
-		height: 1.25rem;
-		background: var(--border);
-		border-radius: 0.625rem;
-		transition: background 0.2s;
-		margin-top: 0.1rem;
-	}
-
-	.toggle-switch::after {
-		content: '';
-		position: absolute;
-		top: 2px;
-		left: 2px;
-		width: 1rem;
-		height: 1rem;
-		background: white;
-		border-radius: 50%;
-		transition: transform 0.2s;
-		box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
-	}
-
-	.toggle-switch.on {
-		background: var(--blue);
-	}
-
-	.toggle-switch.on::after {
-		transform: translateX(1rem);
-	}
-
-	.toggle-title {
-		font-size: 0.85rem;
-		font-weight: 600;
+		padding: 0.2rem 0;
+		font-size: 0.72rem;
 		color: var(--text);
-		text-transform: none;
-		letter-spacing: normal;
-		display: block;
 	}
 
-	.toggle-desc {
-		font-size: 0.75rem;
-		color: var(--text-muted);
-		text-transform: none;
-		letter-spacing: normal;
-		font-weight: normal;
-		line-height: 1.4;
-		display: block;
-		margin-top: 0.15rem;
+	.option-check input[type="checkbox"] {
+		accent-color: var(--blue);
+		width: 13px;
+		height: 13px;
+		flex-shrink: 0;
 	}
 
-	/* Neutralization */
-	.neutralization-control {
+	/* Neutralization inline */
+	.neut-inline {
 		display: flex;
-		flex-direction: column;
+		align-items: center;
 		gap: 0.5rem;
-		padding: 0.5rem 0;
+		margin-top: 0.5rem;
+		padding-top: 0.5rem;
+		border-top: 1px solid var(--border-light);
 	}
 
-	.neutralization-header {
-		text-align: center;
+	.neut-label {
+		font-size: 0.6rem;
+		font-weight: 600;
+		color: var(--text-muted);
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		white-space: nowrap;
 	}
 
-	.neutralization-value {
-		font-size: 1.5rem;
+	.neut-inline input[type="range"] {
+		flex: 1;
+		accent-color: var(--blue);
+	}
+
+	.neut-value {
+		font-size: 0.75rem;
 		font-weight: 700;
 		color: var(--blue);
 		font-variant-numeric: tabular-nums;
+		min-width: 2.5rem;
+		text-align: right;
 	}
 
-	.neutralization-labels {
-		display: flex;
-		justify-content: space-between;
-		font-size: 0.7rem;
-		color: var(--text-muted);
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-	}
-
-	/* Cost estimate */
+	/* Cost + launch */
 	.deploy-launch-section {
 		display: flex;
-		flex-direction: column;
-		align-items: stretch;
-		gap: 1rem;
-	}
-
-	.cost-estimate {
-		display: flex;
-		flex-direction: column;
-		gap: 0.5rem;
-	}
-
-	.cost-row {
-		display: flex;
-		justify-content: space-between;
 		align-items: center;
-		font-size: 0.78rem;
+		gap: 0.75rem;
 	}
 
-	.cost-label {
+	.cost-inline {
+		display: flex;
+		gap: 0.6rem;
+		font-size: 0.68rem;
 		color: var(--text-muted);
-		font-size: 0.7rem;
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-	}
-
-	.cost-value {
 		font-family: 'SF Mono', 'Consolas', monospace;
-		font-size: 0.8rem;
-		color: var(--text-secondary);
 		font-variant-numeric: tabular-nums;
+		white-space: nowrap;
 	}
 
 	.cost-highlight {
@@ -1168,71 +1035,55 @@
 		font-weight: 600;
 	}
 
-	/* Launch button */
 	.launch-btn {
-		width: 100%;
+		margin-left: auto;
 		background: var(--blue);
 		border: none;
-		padding: 0.75rem 1.5rem;
-		border-radius: 8px;
+		padding: 0.5rem 1.25rem;
+		border-radius: 6px;
 		cursor: pointer;
 		color: white;
-		font-size: 0.9rem;
+		font-size: 0.75rem;
 		font-weight: 700;
-		transition: opacity 0.15s, box-shadow 0.15s, transform 0.1s;
+		transition: opacity 0.15s, transform 0.1s;
 		box-shadow: 0 2px 4px rgba(9, 105, 218, 0.25);
 		display: flex;
 		align-items: center;
-		justify-content: center;
-		gap: 0.5rem;
-		min-height: 0;
+		gap: 0.4rem;
+		white-space: nowrap;
 	}
 
-	.launch-btn:hover:not(:disabled) {
-		opacity: 0.9;
-		transform: translateY(-1px);
-		box-shadow: 0 4px 8px rgba(9, 105, 218, 0.3);
-	}
-
-	.launch-btn:active:not(:disabled) {
-		transform: translateY(0);
-	}
-
+	.launch-btn:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); }
+	.launch-btn:active:not(:disabled) { transform: translateY(0); }
 	.launch-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 	.launch-spinner {
 		display: inline-block;
-		width: 0.9rem;
-		height: 0.9rem;
+		width: 0.8rem;
+		height: 0.8rem;
 		border: 2px solid rgba(255, 255, 255, 0.3);
 		border-top-color: white;
 		border-radius: 50%;
 		animation: spin 0.6s linear infinite;
 	}
 
-	@keyframes spin {
-		to { transform: rotate(360deg); }
-	}
+	@keyframes spin { to { transform: rotate(360deg); } }
 
 	/* ── Responsive ── */
 	@media (max-width: 900px) {
 		.cards { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
-		.field-grid.three-col { grid-template-columns: 1fr 1fr; }
-		.deploy-grid { grid-template-columns: 1fr; }
 	}
 
 	@media (max-width: 640px) {
 		.cards { grid-template-columns: repeat(2, 1fr); }
-		.deploy-section { padding: 1rem; }
 	}
 
-	@media (max-width: 480px) {
+	@media (max-width: 540px) {
 		h1 { font-size: 1.25rem; }
 		.cards { grid-template-columns: 1fr 1fr; gap: 0.4rem; }
-		.field-grid { grid-template-columns: 1fr; }
-		.field-grid.three-col { grid-template-columns: 1fr; }
-		.deploy-section { padding: 0.85rem; border-radius: 8px; }
-		.deploy-grid { gap: 0.75rem; }
+		.field-grid { grid-template-columns: 1fr 1fr; }
+		.deploy-launch-section { flex-direction: column; }
+		.launch-btn { margin-left: 0; width: 100%; justify-content: center; }
 		.tabs button { padding: 0.5rem 0.75rem; font-size: 0.8rem; }
 	}
 </style>
