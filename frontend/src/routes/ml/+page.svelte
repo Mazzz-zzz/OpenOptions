@@ -954,7 +954,8 @@
 	.field-grid {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.4rem;
+		column-gap: 1.25rem;
+		row-gap: 0.6rem;
 	}
 
 	.field-grid label {
