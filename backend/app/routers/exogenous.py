@@ -8,7 +8,8 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.database import get_exo_db
+from app.database import get_db, get_exo_db
+from app.models import Underlying
 
 logger = logging.getLogger(__name__)
 
@@ -98,3 +99,50 @@ def list_tastytrade(
             for r in rows
         ]
     }
+
+
+@router.post("/exogenous/tastytrade/sync")
+def sync_tastytrade(
+    db: Session = Depends(get_db),
+    exo: Session = Depends(get_exo_db),
+):
+    """Sync current Tastytrade metrics from underlyings table into exo_tastytrade."""
+    rows = (
+        db.query(Underlying)
+        .filter(Underlying.source == "tastytrade", Underlying.market == "equity")
+        .filter(Underlying.last_fetched_at.isnot(None))
+        .all()
+    )
+
+    upserted = 0
+    for u in rows:
+        captured = u.last_fetched_at.date() if u.last_fetched_at else None
+        if not captured:
+            continue
+        exo.execute(
+            text("""
+                INSERT INTO exo_tastytrade (symbol, captured_date, spot_price, iv_rank, iv_percentile, iv_index, iv_5d_change, liquidity)
+                VALUES (:sym, :dt, :spot, :ivr, :ivp, :ivi, :iv5, :liq)
+                ON CONFLICT (symbol, captured_date) DO UPDATE SET
+                    spot_price = EXCLUDED.spot_price,
+                    iv_rank = EXCLUDED.iv_rank,
+                    iv_percentile = EXCLUDED.iv_percentile,
+                    iv_index = EXCLUDED.iv_index,
+                    iv_5d_change = EXCLUDED.iv_5d_change,
+                    liquidity = EXCLUDED.liquidity
+            """),
+            {
+                "sym": u.symbol,
+                "dt": captured,
+                "spot": float(u.last_spot) if u.last_spot is not None else None,
+                "ivr": float(u.iv_rank) if u.iv_rank is not None else None,
+                "ivp": float(u.iv_percentile) if u.iv_percentile is not None else None,
+                "ivi": float(u.iv_index) if u.iv_index is not None else None,
+                "iv5": float(u.iv_index_5d_change) if u.iv_index_5d_change is not None else None,
+                "liq": float(u.liquidity) if u.liquidity is not None else None,
+            },
+        )
+        upserted += 1
+
+    exo.commit()
+    return {"synced": upserted}

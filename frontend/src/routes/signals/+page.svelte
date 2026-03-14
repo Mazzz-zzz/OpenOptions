@@ -103,6 +103,25 @@
 
 	let expandedSource = $state<string | null>(null);
 	let symbolSearch = $state('');
+	let syncingSource = $state<string | null>(null);
+
+	async function syncSource(key: string) {
+		syncingSource = key;
+		try {
+			if (key === 'tastytrade') {
+				const res = await api.syncExoTastytrade();
+				addToast(`Synced ${res.synced} symbols from dashboard`, 'success');
+			} else {
+				addToast(`No sync available for ${key}`, 'error');
+				return;
+			}
+			await loadExogenousData();
+		} catch (e) {
+			addToast(e instanceof Error ? e.message : 'Sync failed', 'error');
+		} finally {
+			syncingSource = null;
+		}
+	}
 
 	let filteredSymbols = $derived(
 		symbolSearch
@@ -671,6 +690,17 @@
 									<span class="exo-detail-label">Database</span>
 									<span class="exo-detail-value mono">exogenous.exo_{src.key}</span>
 								</div>
+								<button
+									class="exo-sync-btn"
+									disabled={syncingSource !== null}
+									onclick={(e) => { e.stopPropagation(); syncSource(src.key); }}
+								>
+									{#if syncingSource === src.key}
+										Syncing...
+									{:else}
+										Sync from Dashboard
+									{/if}
+								</button>
 							</div>
 						{/if}
 					</div>
@@ -1292,6 +1322,23 @@
 		text-align: right;
 		max-width: 60%;
 	}
+
+	.exo-sync-btn {
+		margin-top: 0.5rem;
+		width: 100%;
+		padding: 0.4rem 0.75rem;
+		background: var(--purple);
+		color: white;
+		border: none;
+		border-radius: 5px;
+		font-size: 0.72rem;
+		font-weight: 600;
+		cursor: pointer;
+		transition: opacity 0.15s;
+	}
+
+	.exo-sync-btn:hover:not(:disabled) { opacity: 0.85; }
+	.exo-sync-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 	.exo-add-card {
 		border-style: dashed;

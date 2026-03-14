@@ -43,6 +43,10 @@ export const api = {
 		return request<{ data: ExoTastytradeRow[] }>('GET', `/exogenous/tastytrade${qs}`);
 	},
 
+	syncExoTastytrade() {
+		return request<{ synced: number }>('POST', '/exogenous/tastytrade/sync');
+	},
+
 	// Fetch
 	fetchChain(underlying: string, force = false) {
 		const qs = force ? '?force=true' : '';
