@@ -209,24 +209,27 @@ def _check_poller_key(x_poller_key: Optional[str] = Header(None)):
 
 
 @router.get("/ml/overview")
-async def ml_overview(db: Session = Depends(get_db)):
+async def ml_overview(
+    tournament: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+):
     """Summary: active runs, best model, latest round, ensemble score."""
+    run_filter = [MlRun.status.in_(["pending", "running"])]
+    if tournament:
+        run_filter.append(MlRun.tournament == tournament)
     active_runs = db.query(sa_func.count(MlRun.id)).filter(
-        MlRun.status.in_(["pending", "running"])
+        *run_filter
     ).scalar() or 0
 
-    best_model = (
-        db.query(MlModel)
-        .filter(MlModel.stage == "prod")
-        .order_by(MlModel.correlation.desc().nullslast())
-        .first()
-    )
+    model_q = db.query(MlModel).filter(MlModel.stage == "prod")
+    if tournament:
+        model_q = model_q.filter(MlModel.tournament == tournament)
+    best_model = model_q.order_by(MlModel.correlation.desc().nullslast()).first()
 
-    latest_round = (
-        db.query(MlRound)
-        .order_by(MlRound.round_number.desc())
-        .first()
-    )
+    round_q = db.query(MlRound)
+    if tournament:
+        round_q = round_q.filter(MlRound.tournament == tournament)
+    latest_round = round_q.order_by(MlRound.round_number.desc()).first()
 
     active_ensemble = (
         db.query(MlEnsemble)
@@ -235,12 +238,10 @@ async def ml_overview(db: Session = Depends(get_db)):
     )
 
     # Recent runs
-    recent = (
-        db.query(MlRun)
-        .order_by(MlRun.created_at.desc())
-        .limit(10)
-        .all()
-    )
+    recent_q = db.query(MlRun)
+    if tournament:
+        recent_q = recent_q.filter(MlRun.tournament == tournament)
+    recent = recent_q.order_by(MlRun.created_at.desc()).limit(10).all()
 
     return {
         "active_runs": active_runs,
@@ -284,10 +285,19 @@ async def ml_overview(db: Session = Depends(get_db)):
 async def list_experiments(
     cursor: Optional[int] = None,
     limit: int = Query(default=20, le=100),
+    tournament: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
 ):
     """Cursor-based paginated experiment list."""
     query = db.query(MlExperiment)
+
+    # Filter to experiments that have at least one run in this tournament
+    if tournament:
+        query = query.filter(
+            MlExperiment.id.in_(
+                db.query(MlRun.experiment_id).filter(MlRun.tournament == tournament)
+            )
+        )
 
     if cursor is not None:
         query = query.filter(MlExperiment.id < cursor)
@@ -300,12 +310,11 @@ async def list_experiments(
 
     data = []
     for exp in experiments:
-        run_count = db.query(sa_func.count(MlRun.id)).filter(
-            MlRun.experiment_id == exp.id
-        ).scalar() or 0
-        best_corr = db.query(sa_func.max(MlRun.correlation)).filter(
-            MlRun.experiment_id == exp.id
-        ).scalar()
+        run_q = [MlRun.experiment_id == exp.id]
+        if tournament:
+            run_q.append(MlRun.tournament == tournament)
+        run_count = db.query(sa_func.count(MlRun.id)).filter(*run_q).scalar() or 0
+        best_corr = db.query(sa_func.max(MlRun.correlation)).filter(*run_q).scalar()
         data.append(ExperimentOut(
             id=exp.id,
             name=exp.name,
@@ -392,13 +401,15 @@ async def run_metrics(run_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/ml/models")
-async def list_models(db: Session = Depends(get_db)):
+async def list_models(
+    tournament: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+):
     """Registered models with stage/version."""
-    models = (
-        db.query(MlModel)
-        .order_by(MlModel.updated_at.desc())
-        .all()
-    )
+    q = db.query(MlModel)
+    if tournament:
+        q = q.filter(MlModel.tournament == tournament)
+    models = q.order_by(MlModel.updated_at.desc()).all()
     return {
         "data": [
             ModelOut(
@@ -491,15 +502,14 @@ async def update_model(model_id: int, body: ModelPatch, db: Session = Depends(ge
 @router.get("/ml/rounds")
 async def list_rounds(
     limit: int = Query(default=50, le=200),
+    tournament: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
 ):
     """Numerai round history."""
-    rounds = (
-        db.query(MlRound)
-        .order_by(MlRound.round_number.desc())
-        .limit(limit)
-        .all()
-    )
+    q = db.query(MlRound)
+    if tournament:
+        q = q.filter(MlRound.tournament == tournament)
+    rounds = q.order_by(MlRound.round_number.desc()).limit(limit).all()
     return {
         "data": [
             RoundOut(
@@ -551,9 +561,10 @@ async def trigger_training(body: TrainRequest, db: Session = Depends(get_db)):
     from app.services.sagemaker_service import create_training_job
 
     # Validate inputs
+    is_signals = body.feature_set.startswith("signals_")
     valid_feature_sets = {"small", "medium", "all"}
-    if body.feature_set not in valid_feature_sets:
-        raise HTTPException(status_code=400, detail=f"feature_set must be one of {valid_feature_sets}")
+    if not is_signals and body.feature_set not in valid_feature_sets:
+        raise HTTPException(status_code=400, detail=f"feature_set must be one of {valid_feature_sets} or signals_*")
 
     valid_model_types = {"lgbm", "catboost"}
     if body.model_type not in valid_model_types:
@@ -578,8 +589,10 @@ async def trigger_training(body: TrainRequest, db: Session = Depends(get_db)):
         "upload": body.upload,
         **hyperparams,
     }
+    tournament = "signals" if is_signals else "classic"
     run = MlRun(
         experiment_id=exp.id,
+        tournament=tournament,
         model_type=body.model_type,
         status="pending",
         hyperparams_json=json.dumps(full_config),

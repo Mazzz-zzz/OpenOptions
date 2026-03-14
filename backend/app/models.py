@@ -158,6 +158,7 @@ class MlRun(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     experiment_id = Column(Integer, ForeignKey("ml_experiments.id", ondelete="CASCADE"), nullable=False)
+    tournament = Column(String(20), nullable=False, default="classic")  # classic, signals
     model_type = Column(String(30), nullable=False)  # lgbm, tabnet, ensemble
     status = Column(String(20), nullable=False, default="pending")  # pending, running, completed, failed
     hyperparams_json = Column(String(4000))
@@ -184,6 +185,7 @@ class MlRun(Base):
     __table_args__ = (
         Index("ix_ml_runs_experiment_status", "experiment_id", "status"),
         Index("ix_ml_runs_sagemaker_job", "sagemaker_job_name"),
+        Index("ix_ml_runs_tournament", "tournament"),
     )
 
 
@@ -210,6 +212,7 @@ class MlModel(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(120), unique=True, nullable=False)
+    tournament = Column(String(20), nullable=False, default="classic")  # classic, signals
     model_type = Column(String(30), nullable=False)
     stage = Column(String(20), nullable=False, default="dev")  # dev, staging, prod
     version = Column(Integer, nullable=False, default=1)
@@ -233,6 +236,7 @@ class MlRound(Base):
     __tablename__ = "ml_rounds"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    tournament = Column(String(20), nullable=False, default="classic")  # classic, signals
     round_number = Column(Integer, nullable=False)
     model_name = Column(String(120), nullable=False)
     live_corr = Column(Numeric(10, 6))

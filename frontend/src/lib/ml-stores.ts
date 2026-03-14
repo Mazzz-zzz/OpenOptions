@@ -13,8 +13,8 @@ import {
 
 export const mlOverview = writable<MlOverview | null>(null);
 
-export async function loadMlOverview() {
-	const data = await api.getMlOverview();
+export async function loadMlOverview(tournament?: string) {
+	const data = await api.getMlOverview(tournament);
 	mlOverview.set(data);
 }
 
@@ -33,6 +33,8 @@ function createExperimentStore() {
 		loading: false,
 	});
 
+	let activeTournament: string | undefined;
+
 	async function load(reset = false) {
 		const state = get(store);
 		if (state.loading) return;
@@ -40,7 +42,7 @@ function createExperimentStore() {
 		store.update((s) => ({ ...s, loading: true }));
 		try {
 			const cursor = reset ? undefined : state.cursor ?? undefined;
-			const res = await api.getMlExperiments({ cursor, limit: 20 });
+			const res = await api.getMlExperiments({ cursor, limit: 20, tournament: activeTournament });
 			store.update((s) => ({
 				items: reset ? res.data : [...s.items, ...res.data],
 				cursor: res.next_cursor,
@@ -55,7 +57,10 @@ function createExperimentStore() {
 	return {
 		subscribe: store.subscribe,
 		load,
-		refresh: () => load(true),
+		refresh: (tournament?: string) => {
+			activeTournament = tournament;
+			return load(true);
+		},
 	};
 }
 
@@ -65,8 +70,8 @@ export const mlExperiments = createExperimentStore();
 
 export const mlModels = writable<MlModelData[]>([]);
 
-export async function loadMlModels() {
-	const res = await api.getMlModels();
+export async function loadMlModels(tournament?: string) {
+	const res = await api.getMlModels(tournament);
 	mlModels.set(res.data);
 }
 
@@ -74,8 +79,8 @@ export async function loadMlModels() {
 
 export const mlRounds = writable<MlRoundData[]>([]);
 
-export async function loadMlRounds() {
-	const res = await api.getMlRounds();
+export async function loadMlRounds(tournament?: string) {
+	const res = await api.getMlRounds(50, tournament);
 	mlRounds.set(res.data);
 }
 
@@ -94,24 +99,26 @@ export const trainingInProgress = writable(false);
 
 let pollInterval: ReturnType<typeof setInterval> | null = null;
 let metricsRefreshCallback: (() => Promise<void>) | null = null;
+let pollTournament: string | undefined;
 
 /** Register a callback to refresh metrics during polling (called from +page). */
 export function setMetricsRefreshCallback(cb: (() => Promise<void>) | null) {
 	metricsRefreshCallback = cb;
 }
 
-export async function triggerTraining(body: TrainRequest) {
+export async function triggerTraining(body: TrainRequest, tournament?: string) {
 	const result = await api.triggerTraining(body);
 	trainingInProgress.set(true);
-	startPolling();
+	startPolling(tournament);
 	return result;
 }
 
-export function startPolling() {
+export function startPolling(tournament?: string) {
 	if (pollInterval) return;
+	pollTournament = tournament;
 	pollInterval = setInterval(async () => {
 		try {
-			await loadMlOverview();
+			await loadMlOverview(pollTournament);
 			// Refresh metrics for selected run while training is active
 			if (metricsRefreshCallback) {
 				await metricsRefreshCallback();
@@ -126,8 +133,8 @@ export function startPolling() {
 				}
 				// Refresh all data when training completes
 				await Promise.all([
-					mlExperiments.refresh(),
-					loadMlModels(),
+					mlExperiments.refresh(pollTournament),
+					loadMlModels(pollTournament),
 				]);
 			}
 		} catch {

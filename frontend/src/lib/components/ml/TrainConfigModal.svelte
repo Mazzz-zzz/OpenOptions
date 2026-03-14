@@ -98,6 +98,8 @@
 					<select id="instance-type" bind:value={instanceType}>
 						<option value="ml.m5.xlarge">m5.xlarge — 4 vCPU, 16 GB</option>
 						<option value="ml.m5.2xlarge">m5.2xlarge — 8 vCPU, 32 GB</option>
+						<option value="ml.m5.4xlarge">m5.4xlarge — 16 vCPU, 64 GB</option>
+						<option value="ml.m5.12xlarge">m5.12xlarge — 48 vCPU, 192 GB</option>
 					</select>
 				</div>
 

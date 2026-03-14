@@ -69,6 +69,7 @@
 		'ml.m5.xlarge': { rate: 0.269, spec: '4 vCPU, 16 GB' },
 		'ml.m5.2xlarge': { rate: 0.538, spec: '8 vCPU, 32 GB' },
 		'ml.m5.4xlarge': { rate: 1.075, spec: '16 vCPU, 64 GB' },
+		'ml.m5.12xlarge': { rate: 3.226, spec: '48 vCPU, 192 GB' },
 		'ml.c5.xlarge': { rate: 0.235, spec: '4 vCPU, 8 GB' },
 		'ml.c5.2xlarge': { rate: 0.470, spec: '8 vCPU, 16 GB' },
 	};
@@ -113,10 +114,10 @@
 			if (deployDescription.trim()) {
 				config.description = deployDescription.trim();
 			}
-			const result = await triggerTraining(config);
+			const result = await triggerTraining(config, 'classic');
 			addToast(`Training started: Run #${result.run_id}`, 'success');
 			activeTab = 'overview';
-			await loadMlOverview();
+			await loadMlOverview('classic');
 		} catch (e) {
 			addToast(e instanceof Error ? e.message : 'Failed to start training', 'error');
 		} finally {
@@ -140,14 +141,14 @@
 		setMetricsRefreshCallback(refreshSelectedMetrics);
 		try {
 			await Promise.all([
-				loadMlOverview(),
-				mlExperiments.refresh(),
-				loadMlModels(),
-				loadMlRounds()
+				loadMlOverview('classic'),
+				mlExperiments.refresh('classic'),
+				loadMlModels('classic'),
+				loadMlRounds('classic')
 			]);
 			// Auto-start polling if there are active runs
 			if (($mlOverview?.active_runs ?? 0) > 0) {
-				startPolling();
+				startPolling('classic');
 			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load ML data';
@@ -166,7 +167,7 @@
 		try {
 			await api.cancelTraining(runId);
 			addToast(`Run #${runId} cancelled`, 'success');
-			await loadMlOverview();
+			await loadMlOverview('classic');
 		} catch (e) {
 			addToast(e instanceof Error ? e.message : 'Failed to cancel run', 'error');
 		}
@@ -209,7 +210,7 @@
 	async function promoteModel(modelId: number, stage: string) {
 		try {
 			await api.updateMlModel(modelId, { stage });
-			await loadMlModels();
+			await loadMlModels('classic');
 			addToast(`Model promoted to ${stage}`, 'success');
 		} catch (e) {
 			addToast(e instanceof Error ? e.message : 'Failed to promote model', 'error');
@@ -261,7 +262,7 @@
 
 <div class="ml-page">
 	<header>
-		<h1>Numerai ML</h1>
+		<h1>Numerai Classic</h1>
 		{#if loading}
 			<span class="loading-indicator">Loading...</span>
 		{/if}
@@ -945,8 +946,8 @@
 	.deploy-section {
 		background: var(--bg-card);
 		border: 1px solid var(--border-light);
-		border-radius: 10px;
-		padding: 1.25rem 1.5rem;
+		border-radius: 8px;
+		padding: 0.85rem 1rem;
 		box-shadow: var(--shadow-sm);
 	}
 
@@ -954,25 +955,25 @@
 	.deploy-sidebar { display: flex; flex-direction: column; gap: 1rem; }
 
 	.deploy-form h2 {
-		font-size: 0.75rem;
+		font-size: 0.7rem;
 		text-transform: uppercase;
 		letter-spacing: 0.06em;
 		color: var(--text-secondary);
-		margin: 0 0 0.75rem 0;
-		padding-bottom: 0.5rem;
+		margin: 0 0 0.5rem 0;
+		padding-bottom: 0.35rem;
 		border-bottom: 1px solid var(--border-light);
 	}
 
 	.deploy-form h2:not(:first-child) {
-		margin-top: 1.25rem;
+		margin-top: 0.85rem;
 	}
 
 	.deploy-form label > span:first-child {
 		display: block;
-		font-size: 0.7rem;
+		font-size: 0.65rem;
 		font-weight: 600;
 		color: var(--text-muted);
-		margin-bottom: 0.3rem;
+		margin-bottom: 0.2rem;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 	}
@@ -981,15 +982,15 @@
 	.deploy-form input[type="number"],
 	.deploy-form select {
 		width: 100%;
-		padding: 0.5rem 0.6rem;
+		padding: 0.35rem 0.5rem;
 		background: var(--bg-input);
 		border: 1px solid var(--border);
-		border-radius: 6px;
+		border-radius: 5px;
 		color: var(--text);
-		font-size: 0.82rem;
+		font-size: 0.75rem;
 		font-family: 'SF Mono', 'Consolas', monospace;
 		transition: border-color 0.15s;
-		min-height: 2.5rem;
+		min-height: 0;
 	}
 
 	.deploy-form input[type="range"] {
@@ -1008,7 +1009,7 @@
 	.field-grid {
 		display: grid;
 		grid-template-columns: 1fr 1fr;
-		gap: 0.75rem;
+		gap: 0.5rem;
 	}
 
 	.field-grid.three-col { grid-template-columns: 1fr 1fr 1fr; }
@@ -1167,11 +1168,11 @@
 		width: 100%;
 		background: var(--blue);
 		border: none;
-		padding: 0.75rem 2rem;
-		border-radius: 8px;
+		padding: 0.55rem 1.5rem;
+		border-radius: 6px;
 		cursor: pointer;
 		color: white;
-		font-size: 0.85rem;
+		font-size: 0.8rem;
 		font-weight: 700;
 		transition: opacity 0.15s, box-shadow 0.15s, transform 0.1s;
 		box-shadow: 0 2px 4px rgba(9, 105, 218, 0.25);
@@ -1179,7 +1180,7 @@
 		align-items: center;
 		justify-content: center;
 		gap: 0.5rem;
-		min-height: 2.75rem;
+		min-height: 0;
 	}
 
 	.launch-btn:hover:not(:disabled) {

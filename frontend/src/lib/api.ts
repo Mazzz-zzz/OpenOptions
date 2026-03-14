@@ -81,14 +81,16 @@ export const api = {
 	},
 
 	// ML / Numerai
-	getMlOverview() {
-		return request<MlOverview>('GET', '/ml/overview');
+	getMlOverview(tournament?: string) {
+		const qs = tournament ? `?tournament=${tournament}` : '';
+		return request<MlOverview>('GET', `/ml/overview${qs}`);
 	},
 
-	getMlExperiments(params?: { cursor?: number; limit?: number }) {
+	getMlExperiments(params?: { cursor?: number; limit?: number; tournament?: string }) {
 		const query = new URLSearchParams();
 		if (params?.cursor) query.set('cursor', String(params.cursor));
 		if (params?.limit) query.set('limit', String(params.limit));
+		if (params?.tournament) query.set('tournament', params.tournament);
 		const qs = query.toString();
 		return request<{ data: MlExperimentData[]; next_cursor: number | null }>('GET', `/ml/experiments${qs ? `?${qs}` : ''}`);
 	},
@@ -101,8 +103,9 @@ export const api = {
 		return request<{ data: MlEpochMetric[] }>('GET', `/ml/runs/${runId}/metrics`);
 	},
 
-	getMlModels() {
-		return request<{ data: MlModelData[] }>('GET', '/ml/models');
+	getMlModels(tournament?: string) {
+		const qs = tournament ? `?tournament=${tournament}` : '';
+		return request<{ data: MlModelData[] }>('GET', `/ml/models${qs}`);
 	},
 
 	createMlModel(body: { name: string; model_type: string; run_id?: number; correlation?: number; sharpe?: number }) {
@@ -113,8 +116,10 @@ export const api = {
 		return request<MlModelData>('PATCH', `/ml/models/${id}`, body);
 	},
 
-	getMlRounds(limit = 50) {
-		return request<{ data: MlRoundData[] }>('GET', `/ml/rounds?limit=${limit}`);
+	getMlRounds(limit = 50, tournament?: string) {
+		const query = new URLSearchParams({ limit: String(limit) });
+		if (tournament) query.set('tournament', tournament);
+		return request<{ data: MlRoundData[] }>('GET', `/ml/rounds?${query}`);
 	},
 
 	getMlEnsemble() {

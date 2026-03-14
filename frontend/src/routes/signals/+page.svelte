@@ -26,7 +26,7 @@
 	import ModelComparisonChart from '$lib/components/ml/ModelComparisonChart.svelte';
 	import TrainingProgress from '$lib/components/ml/TrainingProgress.svelte';
 
-	let activeTab = $state<'overview' | 'deploy' | 'data' | 'experiments' | 'models' | 'rounds'>('overview');
+	let activeTab = $state<'overview' | 'deploy' | 'exogenous' | 'experiments' | 'models' | 'rounds'>('overview');
 	let loading = $state(false);
 	let error = $state<string | null>(null);
 
@@ -53,6 +53,8 @@
 	let deployNeutralizationPct = $state(50);
 	let deployNeutralizerAware = $state(true);
 	let deploySampleWeightAware = $state(true);
+	let deployExogenousData = $state(false);
+	let exogenousSymbols = $state('SPY,QQQ,IWM,XLK,XLF,XLE,XLV,AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA,JPM');
 	// LightGBM params
 	let lgbmNumLeaves = $state(512);
 	let lgbmMaxDepth = $state(8);
@@ -69,6 +71,7 @@
 		'ml.m5.xlarge': { rate: 0.269, spec: '4 vCPU, 16 GB' },
 		'ml.m5.2xlarge': { rate: 0.538, spec: '8 vCPU, 32 GB' },
 		'ml.m5.4xlarge': { rate: 1.075, spec: '16 vCPU, 64 GB' },
+		'ml.m5.12xlarge': { rate: 3.226, spec: '48 vCPU, 192 GB' },
 		'ml.c5.xlarge': { rate: 0.235, spec: '4 vCPU, 8 GB' },
 		'ml.c5.2xlarge': { rate: 0.470, spec: '8 vCPU, 16 GB' },
 	};
@@ -83,18 +86,90 @@
 		};
 	});
 
-	// Signals v2.1 data files reference
-	const dataFiles = [
-		{ name: 'train.parquet', desc: 'Training data for your model' },
-		{ name: 'train_neutralizer.parquet', desc: 'Neutralization matrix for training eras' },
-		{ name: 'train_sample_weights.parquet', desc: 'Sample weights vector for training eras' },
-		{ name: 'validation.parquet', desc: 'Validation data, expands weekly with new eras' },
-		{ name: 'validation_neutralizer.parquet', desc: 'Neutralization matrix for validation eras' },
-		{ name: 'validation_sample_weights.parquet', desc: 'Sample weights vector for validation eras' },
-		{ name: 'validation_example_preds.parquet', desc: 'Example predictions for diagnostics' },
-		{ name: 'live.parquet', desc: 'Live data for predictions, changes daily' },
-		{ name: 'live_example_preds.parquet', desc: 'Example live predictions for first submission' },
+	// Exogenous data sources
+	interface ExoSource {
+		id: string;
+		name: string;
+		status: 'active' | 'planned' | 'disabled';
+		provider: string;
+		symbols: number;
+		universe: number;
+		historyDays: number;
+		features: ExoFeature[];
+	}
+	interface ExoFeature {
+		name: string;
+		source: string;
+		desc: string;
+		coverage: number;
+		signal: 'high' | 'medium' | 'low' | 'unknown';
+		usedInRuns: number;
+	}
+
+	const exoSources: ExoSource[] = [
+		{
+			id: 'tastytrade',
+			name: 'Tastytrade Options',
+			status: 'active',
+			provider: 'Tastytrade REST API',
+			symbols: exogenousSymbols.split(',').filter(Boolean).length,
+			universe: 5000,
+			historyDays: 0,
+			features: [
+				{ name: 'opt_iv_rank', source: 'tastytrade', desc: 'IV rank (0-100) — where current IV sits vs 52-week range', coverage: 9.7, signal: 'medium', usedInRuns: 0 },
+				{ name: 'opt_iv_percentile', source: 'tastytrade', desc: 'IV percentile (0-100) — % of days IV was lower', coverage: 9.7, signal: 'medium', usedInRuns: 0 },
+				{ name: 'opt_iv_index', source: 'tastytrade', desc: 'Current IV index level (decimal)', coverage: 9.7, signal: 'low', usedInRuns: 0 },
+				{ name: 'opt_iv_5d_chg', source: 'tastytrade', desc: 'IV index 5-day change — vol momentum', coverage: 9.7, signal: 'high', usedInRuns: 0 },
+				{ name: 'opt_skew_25d', source: 'tastytrade', desc: '25-delta risk reversal (put IV - call IV) — downside fear', coverage: 8.1, signal: 'high', usedInRuns: 0 },
+				{ name: 'opt_term_slope', source: 'tastytrade', desc: 'Near vs far expiry IV slope — event risk signal', coverage: 8.1, signal: 'medium', usedInRuns: 0 },
+			],
+		},
 	];
+
+	const coverageBySector = [
+		{ sector: 'Technology', pct: 82 },
+		{ sector: 'Financials', pct: 58 },
+		{ sector: 'Healthcare', pct: 37 },
+		{ sector: 'Energy', pct: 31 },
+		{ sector: 'Consumer Disc.', pct: 45 },
+		{ sector: 'Industrials', pct: 28 },
+		{ sector: 'Comm. Services', pct: 52 },
+		{ sector: 'Utilities', pct: 12 },
+	];
+
+	const coverageByMcap = [
+		{ tier: 'Mega (>200B)', pct: 94 },
+		{ tier: 'Large (10-200B)', pct: 68 },
+		{ tier: 'Mid (2-10B)', pct: 35 },
+		{ tier: 'Small (300M-2B)', pct: 8 },
+		{ tier: 'Micro (<300M)', pct: 1 },
+	];
+
+	let expandedSource = $state<string | null>(null);
+	let symbolSearch = $state('');
+
+	// Parsed symbol list for the symbol table
+	let parsedSymbols = $derived(
+		exogenousSymbols.split(',').map(s => s.trim()).filter(Boolean)
+	);
+
+	let filteredSymbols = $derived(
+		symbolSearch
+			? parsedSymbols.filter(s => s.toLowerCase().includes(symbolSearch.toLowerCase()))
+			: parsedSymbols
+	);
+
+	// All features across all sources
+	let allFeatures = $derived(exoSources.flatMap(s => s.features));
+
+	function signalColor(signal: string): string {
+		switch (signal) {
+			case 'high': return 'var(--green)';
+			case 'medium': return 'var(--orange)';
+			case 'low': return 'var(--text-muted)';
+			default: return 'var(--text-muted)';
+		}
+	}
 
 	async function handleDeploy() {
 		if (!deployExpName.trim()) return;
@@ -123,15 +198,17 @@
 					sample_weight_aware: deploySampleWeightAware,
 					data_version: deployDataVersion,
 					tournament: 'signals',
+					exogenous_data: deployExogenousData,
+					...(deployExogenousData ? { exogenous_symbols: exogenousSymbols.split(',').map(s => s.trim()).filter(Boolean).join(',') } : {}),
 				},
 			};
 			if (deployDescription.trim()) {
 				config.description = deployDescription.trim();
 			}
-			const result = await triggerTraining(config);
+			const result = await triggerTraining(config, 'signals');
 			addToast(`Signals training started: Run #${result.run_id}`, 'success');
 			activeTab = 'overview';
-			await loadMlOverview();
+			await loadMlOverview('signals');
 		} catch (e) {
 			addToast(e instanceof Error ? e.message : 'Failed to start training', 'error');
 		} finally {
@@ -154,13 +231,13 @@
 		setMetricsRefreshCallback(refreshSelectedMetrics);
 		try {
 			await Promise.all([
-				loadMlOverview(),
-				mlExperiments.refresh(),
-				loadMlModels(),
-				loadMlRounds()
+				loadMlOverview('signals'),
+				mlExperiments.refresh('signals'),
+				loadMlModels('signals'),
+				loadMlRounds('signals')
 			]);
 			if (($mlOverview?.active_runs ?? 0) > 0) {
-				startPolling();
+				startPolling('signals');
 			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load Signals data';
@@ -179,7 +256,7 @@
 		try {
 			await api.cancelTraining(runId);
 			addToast(`Run #${runId} cancelled`, 'success');
-			await loadMlOverview();
+			await loadMlOverview('signals');
 		} catch (e) {
 			addToast(e instanceof Error ? e.message : 'Failed to cancel run', 'error');
 		}
@@ -222,7 +299,7 @@
 	async function promoteModel(modelId: number, stage: string) {
 		try {
 			await api.updateMlModel(modelId, { stage });
-			await loadMlModels();
+			await loadMlModels('signals');
 			addToast(`Model promoted to ${stage}`, 'success');
 		} catch (e) {
 			addToast(e instanceof Error ? e.message : 'Failed to promote model', 'error');
@@ -290,7 +367,7 @@
 	<div class="tabs">
 		<button class:active={activeTab === 'overview'} onclick={() => (activeTab = 'overview')}>Overview</button>
 		<button class:active={activeTab === 'deploy'} onclick={() => (activeTab = 'deploy')}>Deploy</button>
-		<button class:active={activeTab === 'data'} onclick={() => (activeTab = 'data')}>Data</button>
+		<button class:active={activeTab === 'exogenous'} onclick={() => (activeTab = 'exogenous')}>Exogenous</button>
 		<button class:active={activeTab === 'experiments'} onclick={() => (activeTab = 'experiments')}>Experiments</button>
 		<button class:active={activeTab === 'models'} onclick={() => (activeTab = 'models')}>Models</button>
 		<button class:active={activeTab === 'rounds'} onclick={() => (activeTab = 'rounds')}>Rounds</button>
@@ -510,7 +587,28 @@
 									<span class="toggle-desc">Auto-submit predictions via SignalsAPI after training</span>
 								</div>
 							</label>
+							<label class="toggle-label">
+								<span class="toggle-switch" class:on={deployExogenousData}></span>
+								<input type="checkbox" class="sr-only" bind:checked={deployExogenousData} />
+								<div>
+									<span class="toggle-title">Exogenous Options Data</span>
+									<span class="toggle-desc">Join IV rank, skew, term structure from Tastytrade as extra features</span>
+								</div>
+							</label>
 						</div>
+						{#if deployExogenousData}
+							<div class="exogenous-config">
+								<label>
+									<span>Symbols</span>
+									<textarea
+										bind:value={exogenousSymbols}
+										rows="2"
+										placeholder="SPY,QQQ,AAPL,..."
+									></textarea>
+								</label>
+								<p class="exogenous-hint">Comma-separated tickers. Market metrics (IV rank, IV percentile, IV index, skew, term structure) will be fetched from Tastytrade at training time and joined as features.</p>
+							</div>
+						{/if}
 					</div>
 
 					<div class="deploy-section">
@@ -556,37 +654,159 @@
 			</div>
 		</form>
 
-	<!-- Data Tab -->
-	{:else if activeTab === 'data'}
+	<!-- Exogenous Tab -->
+	{:else if activeTab === 'exogenous'}
+		<!-- Sources -->
 		<div class="section">
-			<div class="data-header">
-				<h2>Signals v2.1 &mdash; Alpha Dataset</h2>
-				<p class="data-sub">Released July 2025. Download via <code>numerapi</code> or the Numerai API.</p>
-			</div>
-
-			<div class="data-install">
-				<code>pip install numerapi</code>
-			</div>
-
-			<div class="data-grid">
-				{#each dataFiles as file}
-					<div class="data-card">
-						<div class="data-card-header">
-							<span class="data-filename">{file.name}</span>
-							<span class="data-badge" class:train={file.name.startsWith('train')} class:val={file.name.startsWith('validation')} class:live={file.name.startsWith('live')}>
-								{file.name.startsWith('train') ? 'train' : file.name.startsWith('validation') ? 'validation' : 'live'}
-							</span>
-						</div>
-						<p class="data-card-desc">{file.desc}</p>
-						<code class="data-download">api.download_dataset("v2.1/{file.name}", "{file.name}")</code>
+			<h2>Data Sources</h2>
+			<div class="exo-sources">
+				{#each exoSources as src}
+					<div class="exo-source-card" class:expanded={expandedSource === src.id}>
+						<button class="exo-source-header" onclick={() => expandedSource = expandedSource === src.id ? null : src.id}>
+							<div class="exo-source-title">
+								<span class="exo-status-dot" class:active={src.status === 'active'} class:planned={src.status === 'planned'}></span>
+								<span class="exo-source-name">{src.name}</span>
+								<span class="exo-source-badge" class:active={src.status === 'active'} class:planned={src.status === 'planned'}>
+									{src.status}
+								</span>
+							</div>
+							<div class="exo-source-stats">
+								<span class="exo-stat"><strong>{src.symbols}</strong> symbols</span>
+								<span class="exo-stat-sep">/</span>
+								<span class="exo-stat"><strong>{src.features.length}</strong> features</span>
+								<span class="exo-stat-sep">/</span>
+								<span class="exo-stat"><strong>{(src.symbols / src.universe * 100).toFixed(1)}%</strong> coverage</span>
+							</div>
+						</button>
+						{#if expandedSource === src.id}
+							<div class="exo-source-detail">
+								<div class="exo-detail-row">
+									<span class="exo-detail-label">Provider</span>
+									<span class="exo-detail-value mono">{src.provider}</span>
+								</div>
+								<div class="exo-detail-row">
+									<span class="exo-detail-label">History</span>
+									<span class="exo-detail-value">{src.historyDays > 0 ? `${src.historyDays} days` : 'Not yet collecting'}</span>
+								</div>
+								<div class="exo-detail-row">
+									<span class="exo-detail-label">Universe coverage</span>
+									<span class="exo-detail-value">{src.symbols} / ~{src.universe.toLocaleString()} stocks</span>
+								</div>
+								<div class="exo-detail-row">
+									<span class="exo-detail-label">Metrics</span>
+									<span class="exo-detail-value">IV rank, IV percentile, IV index, 5d change, skew, term structure</span>
+								</div>
+							</div>
+						{/if}
 					</div>
 				{/each}
+				<div class="exo-source-card exo-add-card">
+					<div class="exo-add-inner">
+						<span class="exo-add-icon">+</span>
+						<span class="exo-add-text">Add Data Source</span>
+						<span class="exo-add-sub">FRED macro, sentiment, alternative data</span>
+					</div>
+				</div>
 			</div>
+		</div>
 
-			<div class="data-snippet">
-				<h3>Quick Start</h3>
-				<pre><code>from numerapi import SignalsAPI{'\n'}api = SignalsAPI(){'\n'}{'\n'}# Download training data{'\n'}api.download_dataset("v2.1/train.parquet", "train.parquet"){'\n'}api.download_dataset("v2.1/train_neutralizer.parquet", "train_neutralizer.parquet"){'\n'}api.download_dataset("v2.1/train_sample_weights.parquet", "train_sample_weights.parquet"){'\n'}{'\n'}# Download validation data{'\n'}api.download_dataset("v2.1/validation.parquet", "validation.parquet"){'\n'}{'\n'}# Download live data for predictions{'\n'}api.download_dataset("v2.1/live.parquet", "live.parquet")</code></pre>
+		<!-- Feature Catalog -->
+		<div class="section">
+			<h2>Feature Catalog</h2>
+			<div class="table-wrapper">
+				<table class="exo-table">
+					<thead>
+						<tr>
+							<th>Feature</th>
+							<th>Source</th>
+							<th>Description</th>
+							<th class="num">Coverage</th>
+							<th class="num">Signal</th>
+							<th class="num">Runs</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each allFeatures as feat}
+							<tr>
+								<td class="mono">{feat.name}</td>
+								<td>{feat.source}</td>
+								<td class="exo-feat-desc">{feat.desc}</td>
+								<td class="num">{feat.coverage.toFixed(1)}%</td>
+								<td class="num">
+									<span class="signal-badge" style="color: {signalColor(feat.signal)}">
+										{feat.signal}
+									</span>
+								</td>
+								<td class="num">{feat.usedInRuns}</td>
+							</tr>
+						{/each}
+						<tr class="derived-row">
+							<td class="mono">opt_has_data</td>
+							<td>derived</td>
+							<td class="exo-feat-desc">Binary flag: 1 if stock has options data, 0 otherwise</td>
+							<td class="num">100%</td>
+							<td class="num"><span class="signal-badge" style="color: var(--text-muted)">low</span></td>
+							<td class="num">0</td>
+						</tr>
+						<tr class="derived-row">
+							<td class="mono">opt_iv_rank_zscore</td>
+							<td>derived</td>
+							<td class="exo-feat-desc">Cross-sectional z-score of IV rank per era</td>
+							<td class="num">9.7%</td>
+							<td class="num"><span class="signal-badge" style="color: var(--green)">high</span></td>
+							<td class="num">0</td>
+						</tr>
+					</tbody>
+				</table>
 			</div>
+		</div>
+
+		<!-- Coverage -->
+		<div class="section">
+			<h2>Coverage Estimates</h2>
+			<div class="coverage-grid">
+				<div class="coverage-panel">
+					<h3>By Sector</h3>
+					{#each coverageBySector as row}
+						<div class="coverage-row">
+							<span class="coverage-label">{row.sector}</span>
+							<div class="coverage-bar-track">
+								<div class="coverage-bar-fill" style="width: {row.pct}%"></div>
+							</div>
+							<span class="coverage-pct">{row.pct}%</span>
+						</div>
+					{/each}
+				</div>
+				<div class="coverage-panel">
+					<h3>By Market Cap</h3>
+					{#each coverageByMcap as row}
+						<div class="coverage-row">
+							<span class="coverage-label">{row.tier}</span>
+							<div class="coverage-bar-track">
+								<div class="coverage-bar-fill" style="width: {row.pct}%"></div>
+							</div>
+							<span class="coverage-pct">{row.pct}%</span>
+						</div>
+					{/each}
+				</div>
+			</div>
+		</div>
+
+		<!-- Symbol List -->
+		<div class="section">
+			<div class="symbol-header">
+				<h2>Tracked Symbols ({parsedSymbols.length})</h2>
+				<input type="text" class="symbol-search" bind:value={symbolSearch} placeholder="Filter symbols..." />
+			</div>
+			<div class="symbol-grid">
+				{#each filteredSymbols as sym}
+					<span class="symbol-chip">{sym}</span>
+				{/each}
+				{#if filteredSymbols.length === 0}
+					<span class="dim">No symbols match</span>
+				{/if}
+			</div>
+			<p class="symbol-hint">Edit the symbol list in the Deploy tab under Exogenous Options Data.</p>
 		</div>
 
 	<!-- Experiments Tab -->
@@ -991,123 +1211,286 @@
 		padding: 3rem;
 	}
 
-	/* ── Data tab ── */
-	.data-header { margin-bottom: 1rem; }
-	.data-header h2 { margin-bottom: 0.25rem; }
-	.data-sub {
-		color: var(--text-secondary);
-		font-size: 0.82rem;
-		margin: 0;
-	}
-	.data-sub code {
-		background: var(--bg-input);
-		padding: 0.1rem 0.4rem;
-		border-radius: 4px;
-		font-size: 0.78rem;
-		color: var(--purple);
-	}
-
-	.data-install {
-		background: var(--bg-card);
-		border: 1px solid var(--border-light);
-		border-radius: 8px;
-		padding: 0.6rem 1rem;
-		margin-bottom: 1rem;
-		display: inline-block;
-	}
-	.data-install code {
-		font-family: 'SF Mono', 'Consolas', monospace;
-		font-size: 0.82rem;
-		color: var(--text);
-	}
-
-	.data-grid {
+	/* ── Exogenous tab ── */
+	.exo-sources {
 		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-		gap: 0.75rem;
-		margin-bottom: 1.5rem;
+		grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+		gap: 0.6rem;
 	}
 
-	.data-card {
+	.exo-source-card {
 		background: var(--bg-card);
 		border: 1px solid var(--border-light);
 		border-radius: 8px;
-		padding: 0.85rem 1rem;
+		overflow: hidden;
 		box-shadow: var(--shadow-sm);
 	}
 
-	.data-card-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-bottom: 0.35rem;
-	}
-
-	.data-filename {
-		font-family: 'SF Mono', 'Consolas', monospace;
-		font-size: 0.78rem;
-		font-weight: 600;
+	.exo-source-header {
+		width: 100%;
+		background: none;
+		border: none;
+		padding: 0.75rem 0.85rem;
+		cursor: pointer;
+		text-align: left;
 		color: var(--text);
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+		transition: background 0.15s;
 	}
 
-	.data-badge {
-		font-size: 0.6rem;
+	.exo-source-header:hover { background: var(--hover-bg); }
+
+	.exo-source-title {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+	}
+
+	.exo-status-dot {
+		width: 7px;
+		height: 7px;
+		border-radius: 50%;
+		flex-shrink: 0;
+		background: var(--text-muted);
+	}
+
+	.exo-status-dot.active { background: var(--green); }
+	.exo-status-dot.planned { background: var(--orange); }
+
+	.exo-source-name {
+		font-size: 0.82rem;
+		font-weight: 600;
+	}
+
+	.exo-source-badge {
+		font-size: 0.58rem;
 		font-weight: 600;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
-		padding: 0.1rem 0.4rem;
-		border-radius: 8px;
+		padding: 0.1rem 0.35rem;
+		border-radius: 6px;
+		background: var(--badge-muted);
+		color: var(--text-muted);
 	}
 
-	.data-badge.train { background: var(--badge-blue); color: var(--blue); }
-	.data-badge.val { background: var(--badge-orange); color: var(--orange); }
-	.data-badge.live { background: var(--badge-green); color: var(--green); }
+	.exo-source-badge.active { background: var(--badge-green); color: var(--green); }
+	.exo-source-badge.planned { background: var(--badge-orange); color: var(--orange); }
 
-	.data-card-desc {
-		font-size: 0.75rem;
+	.exo-source-stats {
+		display: flex;
+		align-items: center;
+		gap: 0.3rem;
+		font-size: 0.7rem;
 		color: var(--text-secondary);
-		margin: 0 0 0.5rem 0;
-		line-height: 1.4;
 	}
 
-	.data-download {
-		display: block;
-		font-family: 'SF Mono', 'Consolas', monospace;
+	.exo-stat strong {
+		color: var(--text);
+		font-variant-numeric: tabular-nums;
+	}
+
+	.exo-stat-sep {
+		color: var(--border);
+		font-size: 0.6rem;
+	}
+
+	.exo-source-detail {
+		border-top: 1px solid var(--border-light);
+		padding: 0.6rem 0.85rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+		background: var(--bg-page);
+	}
+
+	.exo-detail-row {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		font-size: 0.7rem;
+	}
+
+	.exo-detail-label {
+		color: var(--text-muted);
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		font-size: 0.62rem;
+		font-weight: 600;
+	}
+
+	.exo-detail-value {
+		color: var(--text-secondary);
+		text-align: right;
+		max-width: 60%;
+	}
+
+	.exo-add-card {
+		border-style: dashed;
+		border-color: var(--border);
+		background: transparent;
+	}
+
+	.exo-add-inner {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		padding: 1.25rem;
+		gap: 0.25rem;
+		color: var(--text-muted);
+	}
+
+	.exo-add-icon {
+		font-size: 1.5rem;
+		line-height: 1;
+		font-weight: 300;
+		color: var(--border);
+	}
+
+	.exo-add-text {
+		font-size: 0.78rem;
+		font-weight: 600;
+	}
+
+	.exo-add-sub {
 		font-size: 0.65rem;
 		color: var(--text-muted);
-		background: var(--bg-input);
-		padding: 0.3rem 0.5rem;
-		border-radius: 4px;
-		overflow-x: auto;
-		white-space: nowrap;
 	}
 
-	.data-snippet {
+	/* Feature catalog */
+	.exo-table { font-size: 0.73rem; }
+
+	.exo-feat-desc {
+		color: var(--text-secondary);
+		font-size: 0.7rem;
+		max-width: 320px;
+	}
+
+	.signal-badge {
+		font-size: 0.65rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+	}
+
+	.derived-row td { color: var(--text-muted); }
+	.derived-row .mono { font-style: italic; }
+
+	/* Coverage */
+	.coverage-grid {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 0.75rem;
+	}
+
+	.coverage-panel {
 		background: var(--bg-card);
 		border: 1px solid var(--border-light);
 		border-radius: 8px;
-		padding: 1rem 1.25rem;
+		padding: 0.75rem 0.85rem;
 		box-shadow: var(--shadow-sm);
 	}
 
-	.data-snippet h3 {
-		font-size: 0.75rem;
+	.coverage-panel h3 {
+		font-size: 0.65rem;
 		text-transform: uppercase;
 		letter-spacing: 0.06em;
 		color: var(--text-secondary);
-		margin: 0 0 0.75rem 0;
+		margin: 0 0 0.5rem 0;
 	}
 
-	.data-snippet pre {
-		margin: 0;
-		overflow-x: auto;
+	.coverage-row {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin-bottom: 0.3rem;
 	}
 
-	.data-snippet code {
-		font-family: 'SF Mono', 'Consolas', monospace;
-		font-size: 0.75rem;
-		line-height: 1.6;
+	.coverage-label {
+		font-size: 0.7rem;
+		color: var(--text-secondary);
+		width: 100px;
+		flex-shrink: 0;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.coverage-bar-track {
+		flex: 1;
+		height: 6px;
+		background: var(--bg-input);
+		border-radius: 3px;
+		overflow: hidden;
+	}
+
+	.coverage-bar-fill {
+		height: 100%;
+		background: var(--purple);
+		border-radius: 3px;
+		transition: width 0.3s;
+	}
+
+	.coverage-pct {
+		font-size: 0.68rem;
+		font-variant-numeric: tabular-nums;
+		color: var(--text-muted);
+		width: 32px;
+		text-align: right;
+		flex-shrink: 0;
+	}
+
+	/* Symbol list */
+	.symbol-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 0.5rem;
+	}
+
+	.symbol-header h2 { margin-bottom: 0; }
+
+	.symbol-search {
+		padding: 0.3rem 0.5rem;
+		background: var(--bg-input);
+		border: 1px solid var(--border);
+		border-radius: 5px;
 		color: var(--text);
+		font-size: 0.75rem;
+		font-family: 'SF Mono', 'Consolas', monospace;
+		width: 160px;
+	}
+
+	.symbol-search:focus {
+		outline: none;
+		border-color: var(--purple);
+		box-shadow: 0 0 0 2px rgba(130, 80, 223, 0.15);
+	}
+
+	.symbol-grid {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.35rem;
+	}
+
+	.symbol-chip {
+		display: inline-block;
+		padding: 0.2rem 0.5rem;
+		background: var(--bg-card);
+		border: 1px solid var(--border-light);
+		border-radius: 4px;
+		font-size: 0.72rem;
+		font-family: 'SF Mono', 'Consolas', monospace;
+		font-weight: 500;
+		color: var(--text);
+	}
+
+	.symbol-hint {
+		font-size: 0.68rem;
+		color: var(--text-muted);
+		margin: 0.5rem 0 0 0;
 	}
 
 	/* ── Deploy tab ── */
@@ -1123,8 +1506,8 @@
 	.deploy-section {
 		background: var(--bg-card);
 		border: 1px solid var(--border-light);
-		border-radius: 10px;
-		padding: 1.25rem 1.5rem;
+		border-radius: 8px;
+		padding: 0.85rem 1rem;
 		box-shadow: var(--shadow-sm);
 	}
 
@@ -1132,25 +1515,25 @@
 	.deploy-sidebar { display: flex; flex-direction: column; gap: 1rem; }
 
 	.deploy-form h2 {
-		font-size: 0.75rem;
+		font-size: 0.7rem;
 		text-transform: uppercase;
 		letter-spacing: 0.06em;
 		color: var(--text-secondary);
-		margin: 0 0 0.75rem 0;
-		padding-bottom: 0.5rem;
+		margin: 0 0 0.5rem 0;
+		padding-bottom: 0.35rem;
 		border-bottom: 1px solid var(--border-light);
 	}
 
 	.deploy-form h2:not(:first-child) {
-		margin-top: 1.25rem;
+		margin-top: 0.85rem;
 	}
 
 	.deploy-form label > span:first-child {
 		display: block;
-		font-size: 0.7rem;
+		font-size: 0.65rem;
 		font-weight: 600;
 		color: var(--text-muted);
-		margin-bottom: 0.3rem;
+		margin-bottom: 0.2rem;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 	}
@@ -1159,15 +1542,15 @@
 	.deploy-form input[type="number"],
 	.deploy-form select {
 		width: 100%;
-		padding: 0.5rem 0.6rem;
+		padding: 0.35rem 0.5rem;
 		background: var(--bg-input);
 		border: 1px solid var(--border);
-		border-radius: 6px;
+		border-radius: 5px;
 		color: var(--text);
-		font-size: 0.82rem;
+		font-size: 0.75rem;
 		font-family: 'SF Mono', 'Consolas', monospace;
 		transition: border-color 0.15s;
-		min-height: 2.5rem;
+		min-height: 0;
 	}
 
 	.deploy-form input[type="range"] {
@@ -1186,7 +1569,7 @@
 	.field-grid {
 		display: grid;
 		grid-template-columns: 1fr 1fr;
-		gap: 0.75rem;
+		gap: 0.5rem;
 	}
 
 	.field-grid.three-col { grid-template-columns: 1fr 1fr 1fr; }
@@ -1273,6 +1656,51 @@
 		display: block;
 	}
 
+	/* Exogenous config */
+	.exogenous-config {
+		margin-top: 0.5rem;
+		padding: 0.75rem;
+		background: var(--bg-input);
+		border-radius: 6px;
+		border: 1px solid var(--border-light);
+	}
+
+	.exogenous-config label > span:first-child {
+		display: block;
+		font-size: 0.7rem;
+		font-weight: 600;
+		color: var(--text-muted);
+		margin-bottom: 0.3rem;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+
+	.exogenous-config textarea {
+		width: 100%;
+		padding: 0.5rem 0.6rem;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		color: var(--text);
+		font-size: 0.75rem;
+		font-family: 'SF Mono', 'Consolas', monospace;
+		resize: vertical;
+		line-height: 1.5;
+	}
+
+	.exogenous-config textarea:focus {
+		outline: none;
+		border-color: var(--purple);
+		box-shadow: 0 0 0 2px rgba(130, 80, 223, 0.15);
+	}
+
+	.exogenous-hint {
+		font-size: 0.68rem;
+		color: var(--text-muted);
+		margin: 0.4rem 0 0 0;
+		line-height: 1.4;
+	}
+
 	/* Neutralization */
 	.neutralization-control {
 		display: flex;
@@ -1345,11 +1773,11 @@
 		width: 100%;
 		background: var(--purple);
 		border: none;
-		padding: 0.75rem 2rem;
-		border-radius: 8px;
+		padding: 0.55rem 1.5rem;
+		border-radius: 6px;
 		cursor: pointer;
 		color: white;
-		font-size: 0.85rem;
+		font-size: 0.8rem;
 		font-weight: 700;
 		transition: opacity 0.15s, box-shadow 0.15s, transform 0.1s;
 		box-shadow: 0 2px 4px rgba(130, 80, 223, 0.25);
@@ -1357,7 +1785,7 @@
 		align-items: center;
 		justify-content: center;
 		gap: 0.5rem;
-		min-height: 2.75rem;
+		min-height: 0;
 	}
 
 	.launch-btn:hover:not(:disabled) {
@@ -1391,7 +1819,8 @@
 		.cards { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
 		.field-grid.three-col { grid-template-columns: 1fr 1fr; }
 		.deploy-grid { grid-template-columns: 1fr; }
-		.data-grid { grid-template-columns: 1fr; }
+		.exo-sources { grid-template-columns: 1fr; }
+		.coverage-grid { grid-template-columns: 1fr; }
 	}
 
 	@media (max-width: 640px) {
