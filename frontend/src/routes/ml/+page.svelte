@@ -936,13 +936,13 @@
 	/* ── Deploy tab ── */
 	.deploy-form {
 		width: 100%;
-		max-width: 820px;
+		max-width: 720px;
 	}
 
 	.deploy-grid {
 		display: grid;
-		grid-template-columns: 1fr 280px;
-		gap: 1.25rem;
+		grid-template-columns: 1fr 240px;
+		gap: 0.75rem;
 		align-items: start;
 	}
 

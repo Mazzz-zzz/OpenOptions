@@ -55,8 +55,7 @@
 	let deployNeutralizationPct = $state(50);
 	let deployNeutralizerAware = $state(true);
 	let deploySampleWeightAware = $state(true);
-	let deployExogenousData = $state(false);
-	let exogenousSymbols = $state('SPY,QQQ,IWM,XLK,XLF,XLE,XLV,AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA,JPM');
+	let deployExoSources = $state<Set<string>>(new Set());
 	// LightGBM params
 	let lgbmNumLeaves = $state(512);
 	let lgbmMaxDepth = $state(8);
@@ -195,8 +194,7 @@
 					sample_weight_aware: deploySampleWeightAware,
 					data_version: deployDataVersion,
 					tournament: 'signals',
-					exogenous_data: deployExogenousData,
-					...(deployExogenousData ? { exogenous_symbols: exogenousSymbols.split(',').map(s => s.trim()).filter(Boolean).join(',') } : {}),
+					exogenous_sources: [...deployExoSources].join(',') || null,
 				},
 			};
 			if (deployDescription.trim()) {
@@ -585,28 +583,36 @@
 									<span class="toggle-desc">Auto-submit predictions via SignalsAPI after training</span>
 								</div>
 							</label>
-							<label class="toggle-label">
-								<span class="toggle-switch" class:on={deployExogenousData}></span>
-								<input type="checkbox" class="sr-only" bind:checked={deployExogenousData} />
-								<div>
-									<span class="toggle-title">Exogenous Options Data</span>
-									<span class="toggle-desc">Join IV rank, skew, term structure from Tastytrade as extra features</span>
-								</div>
-							</label>
 						</div>
-						{#if deployExogenousData}
-							<div class="exogenous-config">
-								<label>
-									<span>Symbols</span>
-									<textarea
-										bind:value={exogenousSymbols}
-										rows="2"
-										placeholder="SPY,QQQ,AAPL,..."
-									></textarea>
+
+					<div class="deploy-section">
+						<h2>Exogenous Data</h2>
+						<div class="exo-select-stack">
+							{#each exoSources as src}
+								<label class="exo-select-label">
+									<input
+										type="checkbox"
+										checked={deployExoSources.has(src.key)}
+										onchange={() => {
+											const next = new Set(deployExoSources);
+											if (next.has(src.key)) next.delete(src.key); else next.add(src.key);
+											deployExoSources = next;
+										}}
+									/>
+									<div class="exo-select-info">
+										<span class="exo-select-name">{src.name}</span>
+										<span class="exo-select-meta">
+											{src.row_count} rows
+											{#if src.symbols > 0}&middot; {src.symbols} symbols{/if}
+											{#if !src.row_count}<span class="exo-select-empty">(no data)</span>{/if}
+										</span>
+									</div>
 								</label>
-								<p class="exogenous-hint">Comma-separated tickers. Market metrics (IV rank, IV percentile, IV index, skew, term structure) will be fetched from Tastytrade at training time and joined as features.</p>
-							</div>
-						{/if}
+							{/each}
+							{#if exoSources.length === 0}
+								<span class="dim" style="font-size: 0.72rem">Loading sources...</span>
+							{/if}
+						</div>
 					</div>
 
 					<div class="deploy-section">
@@ -1423,12 +1429,12 @@
 	/* ── Deploy tab ── */
 	.deploy-form {
 		width: 100%;
-		max-width: 820px;
+		max-width: 720px;
 	}
 
 	.deploy-grid {
 		display: grid;
-		grid-template-columns: 1fr 260px;
+		grid-template-columns: 1fr 240px;
 		gap: 0.75rem;
 		align-items: start;
 	}
@@ -1586,49 +1592,52 @@
 		display: block;
 	}
 
-	/* Exogenous config */
-	.exogenous-config {
-		margin-top: 0.5rem;
-		padding: 0.75rem;
-		background: var(--bg-input);
-		border-radius: 6px;
-		border: 1px solid var(--border-light);
+	/* Exogenous source multi-select */
+	.exo-select-stack {
+		display: flex;
+		flex-direction: column;
+		gap: 0.2rem;
 	}
 
-	.exogenous-config label > span:first-child {
-		display: block;
-		font-size: 0.7rem;
-		font-weight: 600;
-		color: var(--text-muted);
-		margin-bottom: 0.3rem;
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
+	.exo-select-label {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.35rem 0.4rem;
+		border-radius: 5px;
+		cursor: pointer;
+		transition: background 0.15s;
 	}
 
-	.exogenous-config textarea {
-		width: 100%;
-		padding: 0.5rem 0.6rem;
-		background: var(--bg-card);
-		border: 1px solid var(--border);
-		border-radius: 6px;
-		color: var(--text);
+	.exo-select-label:hover { background: var(--bg-input); }
+
+	.exo-select-label input[type="checkbox"] {
+		accent-color: var(--purple);
+		width: 14px;
+		height: 14px;
+		flex-shrink: 0;
+	}
+
+	.exo-select-info {
+		display: flex;
+		flex-direction: column;
+		gap: 0.05rem;
+	}
+
+	.exo-select-name {
 		font-size: 0.75rem;
-		font-family: 'SF Mono', 'Consolas', monospace;
-		resize: vertical;
-		line-height: 1.5;
+		font-weight: 600;
+		color: var(--text);
 	}
 
-	.exogenous-config textarea:focus {
-		outline: none;
-		border-color: var(--purple);
-		box-shadow: 0 0 0 2px rgba(130, 80, 223, 0.15);
-	}
-
-	.exogenous-hint {
-		font-size: 0.68rem;
+	.exo-select-meta {
+		font-size: 0.62rem;
 		color: var(--text-muted);
-		margin: 0.4rem 0 0 0;
-		line-height: 1.4;
+	}
+
+	.exo-select-empty {
+		color: var(--text-muted);
+		font-style: italic;
 	}
 
 	/* Neutralization */
