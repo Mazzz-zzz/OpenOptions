@@ -36,6 +36,9 @@ HP_TO_ENV = {
     "early_stopping_rounds": "ML_EARLY_STOPPING_ROUNDS",
     "max_train_eras": "ML_MAX_TRAIN_ERAS",
     "neutralization_proportion": "ML_NEUTRALIZATION_PROPORTION",
+    "multi_target_enabled": "ML_MULTI_TARGET_ENABLED",
+    "enable_era_stats": "ML_ENABLE_ERA_STATS",
+    "enable_group_aggregates": "ML_ENABLE_GROUP_AGGREGATES",
 }
 for hp_key, env_key in HP_TO_ENV.items():
     if hp_key in hp:

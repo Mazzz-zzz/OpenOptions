@@ -175,6 +175,8 @@ class MlRun(Base):
     sagemaker_job_name = Column(String(120))
     sagemaker_job_arn = Column(String(256))
     error_message = Column(String(2000))
+    instance_type = Column(String(30))
+    cost_usd = Column(Numeric(10, 4))
 
     experiment = relationship("MlExperiment", back_populates="runs")
     epoch_metrics = relationship("MlEpochMetric", back_populates="run", cascade="all, delete-orphan")

@@ -391,6 +391,7 @@ export interface MlOverview {
 	} | null;
 	latest_round: { round_number: number; status: string; live_corr: number | null } | null;
 	ensemble_score: number | null;
+	total_cost_usd: number;
 	recent_runs: MlRecentRun[];
 }
 
@@ -403,6 +404,8 @@ export interface MlRecentRun {
 	feature_exposure: number | null;
 	max_drawdown: number | null;
 	mmc: number | null;
+	instance_type: string | null;
+	cost_usd: number | null;
 	started_at: string;
 	finished_at: string;
 }
@@ -431,6 +434,8 @@ export interface MlRunData {
 	progress_pct: number | null;
 	current_epoch: number | null;
 	total_epochs: number | null;
+	instance_type: string | null;
+	cost_usd: number | null;
 	started_at: string | null;
 	finished_at: string | null;
 	created_at: string;

@@ -26,7 +26,7 @@
 	import TrainConfigModal from '$lib/components/ml/TrainConfigModal.svelte';
 	import TrainingProgress from '$lib/components/ml/TrainingProgress.svelte';
 
-	let activeTab = $state<'overview' | 'experiments' | 'models' | 'rounds'>('overview');
+	let activeTab = $state<'overview' | 'experiments' | 'models' | 'rounds' | 'deploy'>('overview');
 	let loading = $state(false);
 	let error = $state<string | null>(null);
 
@@ -42,6 +42,83 @@
 	// Training modal state
 	let showTrainModal = $state(false);
 	let trainLoading = $state(false);
+
+	// Deploy tab state
+	let deployExpName = $state('');
+	let deployDescription = $state('');
+	let deployFeatureSet = $state('medium');
+	let deployInstanceType = $state('ml.m5.xlarge');
+	let deployUpload = $state(false);
+	let deployMultiTarget = $state(true);
+	let deployMaxTrainEras = $state(400);
+	let deployNeutralizationProp = $state(0.5);
+	let deployEnableEraStats = $state(true);
+	let deployEnableGroupAggs = $state(true);
+	// LightGBM params
+	let lgbmNumLeaves = $state(512);
+	let lgbmMaxDepth = $state(8);
+	let lgbmLearningRate = $state(0.005);
+	let lgbmNumRounds = $state(10000);
+	let lgbmFeatureFraction = $state(0.1);
+	let lgbmBaggingFraction = $state(0.5);
+	let lgbmEarlyStopping = $state(200);
+	let deployLoading = $state(false);
+
+	// Estimated cost
+	const instanceRates: Record<string, { rate: number; spec: string }> = {
+		'ml.m5.large': { rate: 0.134, spec: '2 vCPU, 8 GB' },
+		'ml.m5.xlarge': { rate: 0.269, spec: '4 vCPU, 16 GB' },
+		'ml.m5.2xlarge': { rate: 0.538, spec: '8 vCPU, 32 GB' },
+		'ml.m5.4xlarge': { rate: 1.075, spec: '16 vCPU, 64 GB' },
+		'ml.c5.xlarge': { rate: 0.235, spec: '4 vCPU, 8 GB' },
+		'ml.c5.2xlarge': { rate: 0.470, spec: '8 vCPU, 16 GB' },
+	};
+	let estimatedCost = $derived(() => {
+		const info = instanceRates[deployInstanceType];
+		if (!info) return null;
+		// Rough estimate: ~15 min for small, ~30 min for medium, ~60 min for all
+		const minutes = deployFeatureSet === 'small' ? 15 : deployFeatureSet === 'medium' ? 30 : 60;
+		return { low: (info.rate * minutes / 60).toFixed(2), high: (info.rate * minutes * 1.5 / 60).toFixed(2) };
+	});
+
+	async function handleDeploy() {
+		if (!deployExpName.trim()) return;
+		deployLoading = true;
+		try {
+			const config: TrainRequest = {
+				experiment_name: deployExpName.trim(),
+				feature_set: deployFeatureSet,
+				model_type: 'lgbm',
+				instance_type: deployInstanceType,
+				upload: deployUpload,
+				hyperparams: {
+					num_leaves: lgbmNumLeaves,
+					max_depth: lgbmMaxDepth,
+					learning_rate: lgbmLearningRate,
+					num_rounds: lgbmNumRounds,
+					feature_fraction: lgbmFeatureFraction,
+					bagging_fraction: lgbmBaggingFraction,
+					early_stopping_rounds: lgbmEarlyStopping,
+					multi_target_enabled: deployMultiTarget,
+					max_train_eras: deployMaxTrainEras,
+					neutralization_proportion: deployNeutralizationProp,
+					enable_era_stats: deployEnableEraStats,
+					enable_group_aggregates: deployEnableGroupAggs,
+				},
+			};
+			if (deployDescription.trim()) {
+				config.description = deployDescription.trim();
+			}
+			const result = await triggerTraining(config);
+			addToast(`Training started: Run #${result.run_id}`, 'success');
+			activeTab = 'overview';
+			await loadMlOverview();
+		} catch (e) {
+			addToast(e instanceof Error ? e.message : 'Failed to start training', 'error');
+		} finally {
+			deployLoading = false;
+		}
+	}
 
 	onMount(async () => {
 		loading = true;
@@ -200,6 +277,7 @@
 		<button class:active={activeTab === 'experiments'} onclick={() => (activeTab = 'experiments')}>Experiments</button>
 		<button class:active={activeTab === 'models'} onclick={() => (activeTab = 'models')}>Models</button>
 		<button class:active={activeTab === 'rounds'} onclick={() => (activeTab = 'rounds')}>Rounds</button>
+		<button class:active={activeTab === 'deploy'} onclick={() => (activeTab = 'deploy')}>Deploy</button>
 	</div>
 
 	<!-- Overview Tab -->
@@ -230,6 +308,12 @@
 				color="var(--red)"
 			/>
 			<MetricCard
+				label="Total Cost"
+				value={$mlOverview ? `$${$mlOverview.total_cost_usd.toFixed(2)}` : '\u2014'}
+				sub="Last 10 runs"
+				color="var(--orange)"
+			/>
+			<MetricCard
 				label="Latest Round"
 				value={$mlOverview?.latest_round ? `#${$mlOverview.latest_round.round_number}` : '\u2014'}
 				sub={$mlOverview?.latest_round?.status ?? 'No submissions'}
@@ -255,6 +339,8 @@
 								<th class="num">Sharpe</th>
 								<th class="num">Feat Exp</th>
 								<th class="num">Max DD</th>
+								<th>Instance</th>
+								<th class="num">Cost</th>
 								<th>Started</th>
 							</tr>
 						</thead>
@@ -269,6 +355,8 @@
 									<td class="num">{fmt(run.sharpe, 2)}</td>
 									<td class="num">{fmt(run.feature_exposure)}</td>
 									<td class="num">{fmt(run.max_drawdown)}</td>
+									<td class="dim">{run.instance_type ?? '\u2014'}</td>
+									<td class="num">{run.cost_usd !== null ? `$${run.cost_usd.toFixed(2)}` : '\u2014'}</td>
 									<td class="dim">{run.started_at || '\u2014'}</td>
 								</tr>
 							{/each}
@@ -334,6 +422,7 @@
 																<th class="num">Sharpe</th>
 																<th class="num">Feat Exp</th>
 																<th class="num">Max DD</th>
+																<th class="num">Cost</th>
 																<th>Hyperparams</th>
 															</tr>
 														</thead>
@@ -348,6 +437,7 @@
 																	<td class="num">{fmt(run.sharpe, 2)}</td>
 																	<td class="num">{fmt(run.feature_exposure)}</td>
 																	<td class="num">{fmt(run.max_drawdown)}</td>
+																	<td class="num">{run.cost_usd !== null ? `$${run.cost_usd.toFixed(2)}` : '\u2014'}</td>
 																	<td class="mono params">{run.hyperparams_json ?? '\u2014'}</td>
 																</tr>
 															{/each}
@@ -468,6 +558,135 @@
 					</table>
 				</div>
 			{/if}
+		</div>
+
+	<!-- Deploy Tab -->
+	{:else if activeTab === 'deploy'}
+		<div class="deploy-page">
+			<form class="deploy-form" onsubmit={(e) => { e.preventDefault(); handleDeploy(); }}>
+				<!-- Run Config -->
+				<div class="deploy-section">
+					<h3>Run Configuration</h3>
+					<div class="field-grid">
+						<label>
+							<span>Experiment Name</span>
+							<input type="text" bind:value={deployExpName} placeholder="e.g. baseline-v3" required />
+						</label>
+						<label>
+							<span>Description</span>
+							<input type="text" bind:value={deployDescription} placeholder="Optional" />
+						</label>
+					</div>
+					<div class="field-grid three-col">
+						<label>
+							<span>Feature Set</span>
+							<select bind:value={deployFeatureSet}>
+								<option value="small">Small (42 features)</option>
+								<option value="medium">Medium (705 features)</option>
+								<option value="all">All (2376 features)</option>
+							</select>
+						</label>
+						<label>
+							<span>Instance Type</span>
+							<select bind:value={deployInstanceType}>
+								{#each Object.entries(instanceRates) as [type, info]}
+									<option value={type}>{type} ({info.spec}) &mdash; ${info.rate}/hr</option>
+								{/each}
+							</select>
+						</label>
+						<label>
+							<span>Max Training Eras</span>
+							<input type="number" bind:value={deployMaxTrainEras} min="50" max="2000" step="50" />
+						</label>
+					</div>
+				</div>
+
+				<!-- LightGBM Params -->
+				<div class="deploy-section">
+					<h3>LightGBM Parameters</h3>
+					<div class="field-grid four-col">
+						<label>
+							<span>Num Leaves</span>
+							<input type="number" bind:value={lgbmNumLeaves} min="16" max="4096" step="16" />
+						</label>
+						<label>
+							<span>Max Depth</span>
+							<input type="number" bind:value={lgbmMaxDepth} min="-1" max="20" />
+						</label>
+						<label>
+							<span>Learning Rate</span>
+							<input type="number" bind:value={lgbmLearningRate} min="0.001" max="0.1" step="0.001" />
+						</label>
+						<label>
+							<span>Num Rounds</span>
+							<input type="number" bind:value={lgbmNumRounds} min="100" max="50000" step="100" />
+						</label>
+						<label>
+							<span>Feature Fraction</span>
+							<input type="number" bind:value={lgbmFeatureFraction} min="0.01" max="1.0" step="0.01" />
+						</label>
+						<label>
+							<span>Bagging Fraction</span>
+							<input type="number" bind:value={lgbmBaggingFraction} min="0.1" max="1.0" step="0.05" />
+						</label>
+						<label>
+							<span>Early Stopping</span>
+							<input type="number" bind:value={lgbmEarlyStopping} min="10" max="1000" step="10" />
+						</label>
+						<label>
+							<span>Neutralization %</span>
+							<input type="number" bind:value={deployNeutralizationProp} min="0" max="1.0" step="0.05" />
+						</label>
+					</div>
+				</div>
+
+				<!-- Feature Engineering & Options -->
+				<div class="deploy-section">
+					<h3>Feature Engineering &amp; Options</h3>
+					<div class="toggle-grid">
+						<label class="toggle-label">
+							<input type="checkbox" bind:checked={deployMultiTarget} />
+							<div>
+								<span class="toggle-title">Multi-Target Training</span>
+								<span class="toggle-desc">Train on all 8 targets, ensemble via rank-average</span>
+							</div>
+						</label>
+						<label class="toggle-label">
+							<input type="checkbox" bind:checked={deployEnableEraStats} />
+							<div>
+								<span class="toggle-title">Era Statistics</span>
+								<span class="toggle-desc">Per-era mean/std of top features</span>
+							</div>
+						</label>
+						<label class="toggle-label">
+							<input type="checkbox" bind:checked={deployEnableGroupAggs} />
+							<div>
+								<span class="toggle-title">Group Aggregates</span>
+								<span class="toggle-desc">Feature group means from feature_groups.yaml</span>
+							</div>
+						</label>
+						<label class="toggle-label">
+							<input type="checkbox" bind:checked={deployUpload} />
+							<div>
+								<span class="toggle-title">Upload to Numerai</span>
+								<span class="toggle-desc">Auto-submit predictions after training</span>
+							</div>
+						</label>
+					</div>
+				</div>
+
+				<!-- Launch -->
+				<div class="deploy-launch">
+					<div class="cost-estimate">
+						{#if estimatedCost()}
+							Estimated cost: <strong>${estimatedCost()?.low} &ndash; ${estimatedCost()?.high}</strong>
+						{/if}
+					</div>
+					<button type="submit" class="launch-btn" disabled={!deployExpName.trim() || deployLoading}>
+						{deployLoading ? 'Launching...' : 'Launch Training'}
+					</button>
+				</div>
+			</form>
 		</div>
 	{/if}
 </div>
@@ -679,5 +898,133 @@
 
 	@media (max-width: 900px) {
 		.cards { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+		.field-grid.three-col, .field-grid.four-col { grid-template-columns: 1fr 1fr; }
 	}
+
+	/* Deploy tab */
+	.deploy-page { max-width: 820px; }
+
+	.deploy-section {
+		background: var(--bg-card);
+		border: 1px solid var(--border-light);
+		border-radius: 10px;
+		padding: 1rem 1.25rem;
+		margin-bottom: 0.75rem;
+	}
+
+	.deploy-section h3 {
+		font-size: 0.8rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: var(--text-secondary);
+		margin: 0 0 0.75rem 0;
+	}
+
+	.deploy-form label span {
+		display: block;
+		font-size: 0.7rem;
+		font-weight: 600;
+		color: var(--text-muted);
+		margin-bottom: 0.2rem;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+
+	.deploy-form input[type="text"],
+	.deploy-form input[type="number"],
+	.deploy-form select {
+		width: 100%;
+		padding: 0.45rem 0.55rem;
+		background: var(--bg-input);
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		color: var(--text);
+		font-size: 0.82rem;
+		font-family: 'SF Mono', 'Consolas', monospace;
+	}
+
+	.deploy-form input:focus,
+	.deploy-form select:focus {
+		outline: none;
+		border-color: var(--blue);
+	}
+
+	.field-grid {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 0.6rem;
+	}
+
+	.field-grid.three-col { grid-template-columns: 1fr 1fr 1fr; }
+	.field-grid.four-col { grid-template-columns: repeat(4, 1fr); }
+
+	.toggle-grid {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 0.5rem;
+	}
+
+	.toggle-label {
+		display: flex;
+		align-items: flex-start;
+		gap: 0.5rem;
+		cursor: pointer;
+		padding: 0.5rem;
+		border-radius: 6px;
+		transition: background 0.15s;
+	}
+
+	.toggle-label:hover { background: var(--hover-bg); }
+
+	.toggle-label input[type="checkbox"] {
+		width: auto;
+		margin-top: 0.15rem;
+		accent-color: var(--blue);
+	}
+
+	.toggle-title {
+		font-size: 0.82rem !important;
+		font-weight: 600 !important;
+		color: var(--text) !important;
+		text-transform: none !important;
+		letter-spacing: normal !important;
+	}
+
+	.toggle-desc {
+		font-size: 0.72rem !important;
+		color: var(--text-muted) !important;
+		text-transform: none !important;
+		letter-spacing: normal !important;
+		font-weight: normal !important;
+	}
+
+	.deploy-launch {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-top: 0.25rem;
+	}
+
+	.cost-estimate {
+		font-size: 0.8rem;
+		color: var(--text-secondary);
+	}
+
+	.cost-estimate strong { color: var(--orange); }
+
+	.launch-btn {
+		background: var(--blue);
+		border: none;
+		padding: 0.6rem 2rem;
+		border-radius: 8px;
+		cursor: pointer;
+		color: white;
+		font-size: 0.9rem;
+		font-weight: 700;
+		transition: opacity 0.15s;
+	}
+
+	.launch-btn:hover:not(:disabled) { opacity: 0.9; }
+	.launch-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>

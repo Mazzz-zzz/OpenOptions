@@ -24,6 +24,20 @@ logger.setLevel(logging.INFO)
 
 S3_BUCKET = os.environ.get("ML_S3_BUCKET", "openoptions-ml")
 
+# SageMaker on-demand hourly rates (ap-southeast-2, USD)
+INSTANCE_HOURLY_RATES = {
+    "ml.m5.large": 0.134,
+    "ml.m5.xlarge": 0.269,
+    "ml.m5.2xlarge": 0.538,
+    "ml.m5.4xlarge": 1.075,
+    "ml.c5.xlarge": 0.235,
+    "ml.c5.2xlarge": 0.470,
+    "ml.c5.4xlarge": 0.941,
+    "ml.p3.2xlarge": 4.284,
+    "ml.g4dn.xlarge": 0.821,
+    "ml.g5.xlarge": 1.408,
+}
+
 
 def _get_db_conn():
     return psycopg2.connect(
@@ -162,10 +176,23 @@ def _process_run(cur, sm, s3, run_id: int, job_name: str, experiment_id: int = 0
     if resp.get("TrainingStartTime"):
         updates["started_at"] = resp["TrainingStartTime"].isoformat()
 
+    # Store instance type from ResourceConfig
+    resource_config = resp.get("ResourceConfig", {})
+    inst_type = resource_config.get("InstanceType")
+    if inst_type:
+        updates["instance_type"] = inst_type
+
     if sm_status == "Completed":
         updates["progress_pct"] = 100
         if resp.get("TrainingEndTime"):
             updates["finished_at"] = resp["TrainingEndTime"].isoformat()
+
+        # Compute cost from BillableSeconds
+        billable_seconds = resp.get("BillableSeconds")
+        if billable_seconds and inst_type:
+            hourly_rate = INSTANCE_HOURLY_RATES.get(inst_type, 0)
+            if hourly_rate:
+                updates["cost_usd"] = round(billable_seconds * hourly_rate / 3600, 4)
 
         # Read final metrics
         metrics = _read_s3_json(s3, S3_BUCKET, f"jobs/{job_name}/metrics.json")
@@ -189,11 +216,22 @@ def _process_run(cur, sm, s3, run_id: int, job_name: str, experiment_id: int = 0
         updates["error_message"] = (resp.get("FailureReason") or "Unknown error")[:2000]
         if resp.get("TrainingEndTime"):
             updates["finished_at"] = resp["TrainingEndTime"].isoformat()
+        # Still compute cost for failed jobs
+        billable_seconds = resp.get("BillableSeconds")
+        if billable_seconds and inst_type:
+            hourly_rate = INSTANCE_HOURLY_RATES.get(inst_type, 0)
+            if hourly_rate:
+                updates["cost_usd"] = round(billable_seconds * hourly_rate / 3600, 4)
 
     if sm_status == "Stopped":
         updates["error_message"] = "Job stopped"
         if resp.get("TrainingEndTime"):
             updates["finished_at"] = resp["TrainingEndTime"].isoformat()
+        billable_seconds = resp.get("BillableSeconds")
+        if billable_seconds and inst_type:
+            hourly_rate = INSTANCE_HOURLY_RATES.get(inst_type, 0)
+            if hourly_rate:
+                updates["cost_usd"] = round(billable_seconds * hourly_rate / 3600, 4)
 
     # 3. Update ml_runs row
     set_clauses = []

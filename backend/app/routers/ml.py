@@ -57,6 +57,8 @@ class RunOut(BaseModel):
     progress_pct: Optional[float] = None
     current_epoch: Optional[int] = None
     total_epochs: Optional[int] = None
+    instance_type: Optional[str] = None
+    cost_usd: Optional[float] = None
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
     created_at: str
@@ -132,6 +134,8 @@ class RunPatch(BaseModel):
     feature_exposure: Optional[float] = None
     max_drawdown: Optional[float] = None
     mmc: Optional[float] = None
+    instance_type: Optional[str] = None
+    cost_usd: Optional[float] = None
     error_message: Optional[str] = None
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
@@ -252,6 +256,7 @@ async def ml_overview(db: Session = Depends(get_db)):
             "live_corr": _fl(latest_round.live_corr),
         } if latest_round else None,
         "ensemble_score": _fl(active_ensemble.correlation) if active_ensemble else None,
+        "total_cost_usd": sum(float(r.cost_usd) for r in recent if r.cost_usd is not None),
         "recent_runs": [
             {
                 "id": r.id,
@@ -262,6 +267,8 @@ async def ml_overview(db: Session = Depends(get_db)):
                 "feature_exposure": _fl(r.feature_exposure),
                 "max_drawdown": _fl(r.max_drawdown),
                 "mmc": _fl(r.mmc),
+                "instance_type": r.instance_type,
+                "cost_usd": _fl(r.cost_usd),
                 "started_at": _ts(r.started_at),
                 "finished_at": _ts(r.finished_at),
             }
@@ -342,6 +349,8 @@ async def list_runs(experiment_id: int, db: Session = Depends(get_db)):
                 progress_pct=_fl(r.progress_pct),
                 current_epoch=r.current_epoch,
                 total_epochs=r.total_epochs,
+                instance_type=r.instance_type,
+                cost_usd=_fl(r.cost_usd),
                 started_at=_ts(r.started_at),
                 finished_at=_ts(r.finished_at),
                 created_at=_ts(r.created_at),
@@ -565,6 +574,7 @@ async def trigger_training(body: TrainRequest, db: Session = Depends(get_db)):
         model_type=body.model_type,
         status="pending",
         hyperparams_json=json.dumps(hyperparams) if hyperparams else None,
+        instance_type=body.instance_type,
     )
     db.add(run)
     db.flush()
@@ -657,6 +667,10 @@ async def update_run(
         run.max_drawdown = body.max_drawdown
     if body.mmc is not None:
         run.mmc = body.mmc
+    if body.instance_type is not None:
+        run.instance_type = body.instance_type
+    if body.cost_usd is not None:
+        run.cost_usd = body.cost_usd
     if body.error_message is not None:
         run.error_message = body.error_message[:2000]
     if body.started_at is not None:
@@ -680,6 +694,8 @@ async def update_run(
         progress_pct=_fl(run.progress_pct),
         current_epoch=run.current_epoch,
         total_epochs=run.total_epochs,
+        instance_type=run.instance_type,
+        cost_usd=_fl(run.cost_usd),
         started_at=_ts(run.started_at),
         finished_at=_ts(run.finished_at),
         created_at=_ts(run.created_at),
