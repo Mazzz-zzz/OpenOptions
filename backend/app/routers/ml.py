@@ -570,13 +570,19 @@ async def trigger_training(body: TrainRequest, db: Session = Depends(get_db)):
         db.add(exp)
         db.flush()
 
-    # Create run
+    # Create run — store full config so we can reproduce later
     hyperparams = body.hyperparams or {}
+    full_config = {
+        "feature_set": body.feature_set,
+        "neutralization_pct": body.neutralization_pct,
+        "upload": body.upload,
+        **hyperparams,
+    }
     run = MlRun(
         experiment_id=exp.id,
         model_type=body.model_type,
         status="pending",
-        hyperparams_json=json.dumps(hyperparams) if hyperparams else None,
+        hyperparams_json=json.dumps(full_config),
         instance_type=body.instance_type,
     )
     db.add(run)
