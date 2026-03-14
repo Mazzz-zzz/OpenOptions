@@ -53,6 +53,7 @@
 				<a href="/iv-crush" class:active={$page.url.pathname === '/iv-crush'} onclick={closeMenu}>Vol Analysis</a>
 				<a href="/contracts" class:active={$page.url.pathname === '/contracts'} onclick={closeMenu}>Contracts</a>
 				<a href="/ml" class:active={$page.url.pathname === '/ml'} onclick={closeMenu}>Numerai</a>
+				<a href="/signals" class:active={$page.url.pathname === '/signals'} onclick={closeMenu}>Signals</a>
 			</div>
 			<div class="nav-fetch">
 				<SymbolSearch bind:value={symbol} onsubmit={handleSelect} placeholder="Select symbol..." loading={$fetchStatus.loading} />
