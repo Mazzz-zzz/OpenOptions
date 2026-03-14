@@ -26,7 +26,7 @@
 	import ModelComparisonChart from '$lib/components/ml/ModelComparisonChart.svelte';
 	import TrainingProgress from '$lib/components/ml/TrainingProgress.svelte';
 
-	let activeTab = $state<'overview' | 'deploy' | 'experiments' | 'models' | 'rounds'>('overview');
+	let activeTab = $state<'overview' | 'deploy' | 'data' | 'experiments' | 'models' | 'rounds'>('overview');
 	let loading = $state(false);
 	let error = $state<string | null>(null);
 
@@ -44,15 +44,15 @@
 	// Deploy tab state
 	let deployExpName = $state('');
 	let deployDescription = $state('');
-	let deployFeatureSet = $state('medium');
+	let deployDataVersion = $state('v2.1');
 	let deployInstanceType = $state('ml.m5.xlarge');
 	let deployModelType = $state<'lgbm' | 'catboost'>('lgbm');
 	let deployUpload = $state(false);
 	let deployMultiTarget = $state(true);
 	let deployMaxTrainEras = $state(400);
 	let deployNeutralizationPct = $state(50);
-	let deployEnableEraStats = $state(true);
-	let deployEnableGroupAggs = $state(true);
+	let deployNeutralizerAware = $state(true);
+	let deploySampleWeightAware = $state(true);
 	// LightGBM params
 	let lgbmNumLeaves = $state(512);
 	let lgbmMaxDepth = $state(8);
@@ -75,7 +75,7 @@
 	let estimatedCost = $derived.by(() => {
 		const info = instanceRates[deployInstanceType];
 		if (!info) return null;
-		const minutes = deployFeatureSet === 'small' ? 15 : deployFeatureSet === 'medium' ? 30 : 60;
+		const minutes = 45; // Signals data is a fixed size
 		return {
 			low: (info.rate * minutes / 60).toFixed(2),
 			high: (info.rate * minutes * 1.5 / 60).toFixed(2),
@@ -83,13 +83,26 @@
 		};
 	});
 
+	// Signals v2.1 data files reference
+	const dataFiles = [
+		{ name: 'train.parquet', desc: 'Training data for your model' },
+		{ name: 'train_neutralizer.parquet', desc: 'Neutralization matrix for training eras' },
+		{ name: 'train_sample_weights.parquet', desc: 'Sample weights vector for training eras' },
+		{ name: 'validation.parquet', desc: 'Validation data, expands weekly with new eras' },
+		{ name: 'validation_neutralizer.parquet', desc: 'Neutralization matrix for validation eras' },
+		{ name: 'validation_sample_weights.parquet', desc: 'Sample weights vector for validation eras' },
+		{ name: 'validation_example_preds.parquet', desc: 'Example predictions for diagnostics' },
+		{ name: 'live.parquet', desc: 'Live data for predictions, changes daily' },
+		{ name: 'live_example_preds.parquet', desc: 'Example live predictions for first submission' },
+	];
+
 	async function handleDeploy() {
 		if (!deployExpName.trim()) return;
 		deployLoading = true;
 		try {
 			const config: TrainRequest = {
 				experiment_name: deployExpName.trim(),
-				feature_set: deployFeatureSet,
+				feature_set: 'signals_' + deployDataVersion,
 				model_type: deployModelType,
 				instance_type: deployInstanceType,
 				upload: deployUpload,
@@ -106,15 +119,17 @@
 					early_stopping_rounds: lgbmEarlyStopping,
 					multi_target_enabled: deployMultiTarget,
 					max_train_eras: deployMaxTrainEras,
-					enable_era_stats: deployEnableEraStats,
-					enable_group_aggregates: deployEnableGroupAggs,
+					neutralizer_aware: deployNeutralizerAware,
+					sample_weight_aware: deploySampleWeightAware,
+					data_version: deployDataVersion,
+					tournament: 'signals',
 				},
 			};
 			if (deployDescription.trim()) {
 				config.description = deployDescription.trim();
 			}
 			const result = await triggerTraining(config);
-			addToast(`Training started: Run #${result.run_id}`, 'success');
+			addToast(`Signals training started: Run #${result.run_id}`, 'success');
 			activeTab = 'overview';
 			await loadMlOverview();
 		} catch (e) {
@@ -124,14 +139,13 @@
 		}
 	}
 
-	/** Silently refresh metrics for the selected run (called by polling). */
 	async function refreshSelectedMetrics() {
 		if (selectedRunId === null) return;
 		try {
 			const res = await api.getMlRunMetrics(selectedRunId);
 			epochMetrics = res.data;
 		} catch {
-			// Silent — don't toast on background refresh failures
+			// Silent
 		}
 	}
 
@@ -145,12 +159,11 @@
 				loadMlModels(),
 				loadMlRounds()
 			]);
-			// Auto-start polling if there are active runs
 			if (($mlOverview?.active_runs ?? 0) > 0) {
 				startPolling();
 			}
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to load ML data';
+			error = e instanceof Error ? e.message : 'Failed to load Signals data';
 			addToast(error!, 'error');
 		} finally {
 			loading = false;
@@ -261,7 +274,10 @@
 
 <div class="ml-page">
 	<header>
-		<h1>Numerai Signals</h1>
+		<div>
+			<h1>Numerai Signals</h1>
+			<span class="data-version">v2.1 Alpha</span>
+		</div>
 		{#if loading}
 			<span class="loading-indicator">Loading...</span>
 		{/if}
@@ -274,6 +290,7 @@
 	<div class="tabs">
 		<button class:active={activeTab === 'overview'} onclick={() => (activeTab = 'overview')}>Overview</button>
 		<button class:active={activeTab === 'deploy'} onclick={() => (activeTab = 'deploy')}>Deploy</button>
+		<button class:active={activeTab === 'data'} onclick={() => (activeTab = 'data')}>Data</button>
 		<button class:active={activeTab === 'experiments'} onclick={() => (activeTab = 'experiments')}>Experiments</button>
 		<button class:active={activeTab === 'models'} onclick={() => (activeTab = 'models')}>Models</button>
 		<button class:active={activeTab === 'rounds'} onclick={() => (activeTab = 'rounds')}>Rounds</button>
@@ -387,7 +404,7 @@
 					<div class="field-grid">
 						<label>
 							<span>Experiment Name</span>
-							<input type="text" bind:value={deployExpName} placeholder="e.g. baseline-v3" required />
+							<input type="text" bind:value={deployExpName} placeholder="e.g. signals-alpha-v1" required />
 						</label>
 						<label>
 							<span>Description</span>
@@ -396,11 +413,9 @@
 					</div>
 					<div class="field-grid three-col">
 						<label>
-							<span>Feature Set</span>
-							<select bind:value={deployFeatureSet}>
-								<option value="small">Small (42 features)</option>
-								<option value="medium">Medium (705 features)</option>
-								<option value="all">All (2376 features)</option>
+							<span>Data Version</span>
+							<select bind:value={deployDataVersion}>
+								<option value="v2.1">v2.1 Alpha (Jul 2025)</option>
 							</select>
 						</label>
 						<label>
@@ -461,38 +476,38 @@
 
 				<div class="deploy-sidebar">
 					<div class="deploy-section">
-						<h2>Options</h2>
+						<h2>Signals Options</h2>
 						<div class="toggle-stack">
+							<label class="toggle-label">
+								<span class="toggle-switch" class:on={deployNeutralizerAware}></span>
+								<input type="checkbox" class="sr-only" bind:checked={deployNeutralizerAware} />
+								<div>
+									<span class="toggle-title">Neutralizer-Aware</span>
+									<span class="toggle-desc">Train using train_neutralizer.parquet matrix for Alpha/MPC scoring</span>
+								</div>
+							</label>
+							<label class="toggle-label">
+								<span class="toggle-switch" class:on={deploySampleWeightAware}></span>
+								<input type="checkbox" class="sr-only" bind:checked={deploySampleWeightAware} />
+								<div>
+									<span class="toggle-title">Sample Weights</span>
+									<span class="toggle-desc">Apply train_sample_weights.parquet during training</span>
+								</div>
+							</label>
 							<label class="toggle-label">
 								<span class="toggle-switch" class:on={deployMultiTarget}></span>
 								<input type="checkbox" class="sr-only" bind:checked={deployMultiTarget} />
 								<div>
 									<span class="toggle-title">Multi-Target Training</span>
-									<span class="toggle-desc">Train on all 8 targets, ensemble via rank-average</span>
-								</div>
-							</label>
-							<label class="toggle-label">
-								<span class="toggle-switch" class:on={deployEnableEraStats}></span>
-								<input type="checkbox" class="sr-only" bind:checked={deployEnableEraStats} />
-								<div>
-									<span class="toggle-title">Era Statistics</span>
-									<span class="toggle-desc">Per-era mean/std of top features</span>
-								</div>
-							</label>
-							<label class="toggle-label">
-								<span class="toggle-switch" class:on={deployEnableGroupAggs}></span>
-								<input type="checkbox" class="sr-only" bind:checked={deployEnableGroupAggs} />
-								<div>
-									<span class="toggle-title">Group Aggregates</span>
-									<span class="toggle-desc">Feature group means from feature_groups.yaml</span>
+									<span class="toggle-desc">Train on all targets, ensemble via rank-average</span>
 								</div>
 							</label>
 							<label class="toggle-label">
 								<span class="toggle-switch" class:on={deployUpload}></span>
 								<input type="checkbox" class="sr-only" bind:checked={deployUpload} />
 								<div>
-									<span class="toggle-title">Upload to Numerai</span>
-									<span class="toggle-desc">Auto-submit predictions after training</span>
+									<span class="toggle-title">Upload to Signals</span>
+									<span class="toggle-desc">Auto-submit predictions via SignalsAPI after training</span>
 								</div>
 							</label>
 						</div>
@@ -541,11 +556,44 @@
 			</div>
 		</form>
 
+	<!-- Data Tab -->
+	{:else if activeTab === 'data'}
+		<div class="section">
+			<div class="data-header">
+				<h2>Signals v2.1 &mdash; Alpha Dataset</h2>
+				<p class="data-sub">Released July 2025. Download via <code>numerapi</code> or the Numerai API.</p>
+			</div>
+
+			<div class="data-install">
+				<code>pip install numerapi</code>
+			</div>
+
+			<div class="data-grid">
+				{#each dataFiles as file}
+					<div class="data-card">
+						<div class="data-card-header">
+							<span class="data-filename">{file.name}</span>
+							<span class="data-badge" class:train={file.name.startsWith('train')} class:val={file.name.startsWith('validation')} class:live={file.name.startsWith('live')}>
+								{file.name.startsWith('train') ? 'train' : file.name.startsWith('validation') ? 'validation' : 'live'}
+							</span>
+						</div>
+						<p class="data-card-desc">{file.desc}</p>
+						<code class="data-download">api.download_dataset("v2.1/{file.name}", "{file.name}")</code>
+					</div>
+				{/each}
+			</div>
+
+			<div class="data-snippet">
+				<h3>Quick Start</h3>
+				<pre><code>from numerapi import SignalsAPI{'\n'}api = SignalsAPI(){'\n'}{'\n'}# Download training data{'\n'}api.download_dataset("v2.1/train.parquet", "train.parquet"){'\n'}api.download_dataset("v2.1/train_neutralizer.parquet", "train_neutralizer.parquet"){'\n'}api.download_dataset("v2.1/train_sample_weights.parquet", "train_sample_weights.parquet"){'\n'}{'\n'}# Download validation data{'\n'}api.download_dataset("v2.1/validation.parquet", "validation.parquet"){'\n'}{'\n'}# Download live data for predictions{'\n'}api.download_dataset("v2.1/live.parquet", "live.parquet")</code></pre>
+			</div>
+		</div>
+
 	<!-- Experiments Tab -->
 	{:else if activeTab === 'experiments'}
 		<div class="section">
 			{#if $mlExperiments.items.length === 0 && !$mlExperiments.loading}
-				<p class="placeholder">No experiments yet. Training runs will appear here.</p>
+				<p class="placeholder">No Signals experiments yet. Launch a training run to get started.</p>
 			{:else}
 				<div class="table-wrapper">
 					<table>
@@ -634,7 +682,7 @@
 	{:else if activeTab === 'models'}
 		<div class="section">
 			{#if $mlModels.length === 0}
-				<p class="placeholder">No registered models. Promote a run to create one.</p>
+				<p class="placeholder">No registered Signals models. Promote a run to create one.</p>
 			{:else}
 				<div class="table-wrapper">
 					<table>
@@ -691,7 +739,7 @@
 	{:else if activeTab === 'rounds'}
 		<div class="section">
 			{#if $mlRounds.length === 0}
-				<p class="placeholder">No Numerai submissions yet. Round history will appear here.</p>
+				<p class="placeholder">No Signals submissions yet. Round history will appear here.</p>
 			{:else}
 				<div class="table-wrapper">
 					<table>
@@ -742,6 +790,17 @@
 	h1 { font-size: 1.5rem; margin: 0; }
 	h2 { font-size: 1rem; margin: 0 0 0.75rem 0; color: var(--text); }
 
+	.data-version {
+		font-size: 0.7rem;
+		font-weight: 600;
+		color: var(--purple);
+		background: rgba(130, 80, 223, 0.08);
+		padding: 0.15rem 0.5rem;
+		border-radius: 10px;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+
 	.loading-indicator { color: var(--text-secondary); font-size: 0.8rem; }
 	.error { color: var(--red); }
 	.error-box {
@@ -783,8 +842,8 @@
 
 	.tabs button:hover { color: var(--text); }
 	.tabs button.active {
-		color: var(--blue);
-		border-bottom-color: var(--blue);
+		color: var(--purple);
+		border-bottom-color: var(--purple);
 	}
 
 	.cards {
@@ -932,6 +991,125 @@
 		padding: 3rem;
 	}
 
+	/* ── Data tab ── */
+	.data-header { margin-bottom: 1rem; }
+	.data-header h2 { margin-bottom: 0.25rem; }
+	.data-sub {
+		color: var(--text-secondary);
+		font-size: 0.82rem;
+		margin: 0;
+	}
+	.data-sub code {
+		background: var(--bg-input);
+		padding: 0.1rem 0.4rem;
+		border-radius: 4px;
+		font-size: 0.78rem;
+		color: var(--purple);
+	}
+
+	.data-install {
+		background: var(--bg-card);
+		border: 1px solid var(--border-light);
+		border-radius: 8px;
+		padding: 0.6rem 1rem;
+		margin-bottom: 1rem;
+		display: inline-block;
+	}
+	.data-install code {
+		font-family: 'SF Mono', 'Consolas', monospace;
+		font-size: 0.82rem;
+		color: var(--text);
+	}
+
+	.data-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+		gap: 0.75rem;
+		margin-bottom: 1.5rem;
+	}
+
+	.data-card {
+		background: var(--bg-card);
+		border: 1px solid var(--border-light);
+		border-radius: 8px;
+		padding: 0.85rem 1rem;
+		box-shadow: var(--shadow-sm);
+	}
+
+	.data-card-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 0.35rem;
+	}
+
+	.data-filename {
+		font-family: 'SF Mono', 'Consolas', monospace;
+		font-size: 0.78rem;
+		font-weight: 600;
+		color: var(--text);
+	}
+
+	.data-badge {
+		font-size: 0.6rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		padding: 0.1rem 0.4rem;
+		border-radius: 8px;
+	}
+
+	.data-badge.train { background: var(--badge-blue); color: var(--blue); }
+	.data-badge.val { background: var(--badge-orange); color: var(--orange); }
+	.data-badge.live { background: var(--badge-green); color: var(--green); }
+
+	.data-card-desc {
+		font-size: 0.75rem;
+		color: var(--text-secondary);
+		margin: 0 0 0.5rem 0;
+		line-height: 1.4;
+	}
+
+	.data-download {
+		display: block;
+		font-family: 'SF Mono', 'Consolas', monospace;
+		font-size: 0.65rem;
+		color: var(--text-muted);
+		background: var(--bg-input);
+		padding: 0.3rem 0.5rem;
+		border-radius: 4px;
+		overflow-x: auto;
+		white-space: nowrap;
+	}
+
+	.data-snippet {
+		background: var(--bg-card);
+		border: 1px solid var(--border-light);
+		border-radius: 8px;
+		padding: 1rem 1.25rem;
+		box-shadow: var(--shadow-sm);
+	}
+
+	.data-snippet h3 {
+		font-size: 0.75rem;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: var(--text-secondary);
+		margin: 0 0 0.75rem 0;
+	}
+
+	.data-snippet pre {
+		margin: 0;
+		overflow-x: auto;
+	}
+
+	.data-snippet code {
+		font-family: 'SF Mono', 'Consolas', monospace;
+		font-size: 0.75rem;
+		line-height: 1.6;
+		color: var(--text);
+	}
+
 	/* ── Deploy tab ── */
 	.deploy-form { width: 100%; }
 
@@ -994,15 +1172,15 @@
 
 	.deploy-form input[type="range"] {
 		width: 100%;
-		accent-color: var(--blue);
+		accent-color: var(--purple);
 		margin-top: 0.35rem;
 	}
 
 	.deploy-form input:focus,
 	.deploy-form select:focus {
 		outline: none;
-		border-color: var(--blue);
-		box-shadow: 0 0 0 2px rgba(9, 105, 218, 0.15);
+		border-color: var(--purple);
+		box-shadow: 0 0 0 2px rgba(130, 80, 223, 0.15);
 	}
 
 	.field-grid {
@@ -1069,7 +1247,7 @@
 	}
 
 	.toggle-switch.on {
-		background: var(--blue);
+		background: var(--purple);
 	}
 
 	.toggle-switch.on::after {
@@ -1109,7 +1287,7 @@
 	.neutralization-value {
 		font-size: 1.25rem;
 		font-weight: 700;
-		color: var(--blue);
+		color: var(--purple);
 		font-variant-numeric: tabular-nums;
 	}
 
@@ -1165,7 +1343,7 @@
 	/* Launch button */
 	.launch-btn {
 		width: 100%;
-		background: var(--blue);
+		background: var(--purple);
 		border: none;
 		padding: 0.75rem 2rem;
 		border-radius: 8px;
@@ -1174,7 +1352,7 @@
 		font-size: 0.85rem;
 		font-weight: 700;
 		transition: opacity 0.15s, box-shadow 0.15s, transform 0.1s;
-		box-shadow: 0 2px 4px rgba(9, 105, 218, 0.25);
+		box-shadow: 0 2px 4px rgba(130, 80, 223, 0.25);
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -1185,7 +1363,7 @@
 	.launch-btn:hover:not(:disabled) {
 		opacity: 0.9;
 		transform: translateY(-1px);
-		box-shadow: 0 4px 8px rgba(9, 105, 218, 0.3);
+		box-shadow: 0 4px 8px rgba(130, 80, 223, 0.3);
 	}
 
 	.launch-btn:active:not(:disabled) {
@@ -1213,6 +1391,7 @@
 		.cards { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
 		.field-grid.three-col { grid-template-columns: 1fr 1fr; }
 		.deploy-grid { grid-template-columns: 1fr; }
+		.data-grid { grid-template-columns: 1fr; }
 	}
 
 	@media (max-width: 640px) {
