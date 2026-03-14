@@ -898,7 +898,7 @@
 
 	/* ── Deploy tab ── */
 	.deploy-form {
-		max-width: 540px;
+		width: 100%;
 		display: flex;
 		flex-direction: column;
 		gap: 0.6rem;
@@ -933,6 +933,7 @@
 	.deploy-form input[type="number"],
 	.deploy-form select {
 		width: 100%;
+		max-width: 200px;
 		padding: 0.3rem 0.4rem;
 		background: var(--bg-input);
 		border: 1px solid var(--border);
@@ -952,7 +953,7 @@
 
 	.field-grid {
 		display: grid;
-		grid-template-columns: 1fr 1fr 1fr;
+		grid-template-columns: repeat(auto-fill, minmax(140px, 200px));
 		gap: 0.4rem;
 	}
 
