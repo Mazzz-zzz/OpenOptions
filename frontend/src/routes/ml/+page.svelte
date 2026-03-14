@@ -941,16 +941,16 @@
 
 	.deploy-grid {
 		display: grid;
-		grid-template-columns: 1fr 260px;
-		gap: 0.75rem;
+		grid-template-columns: 1fr 280px;
+		gap: 1.25rem;
 		align-items: start;
 	}
 
 	.deploy-section {
 		background: var(--bg-card);
 		border: 1px solid var(--border-light);
-		border-radius: 8px;
-		padding: 0.85rem 1rem;
+		border-radius: 10px;
+		padding: 1.25rem 1.5rem;
 		box-shadow: var(--shadow-sm);
 	}
 
@@ -958,25 +958,25 @@
 	.deploy-sidebar { display: flex; flex-direction: column; gap: 1rem; }
 
 	.deploy-form h2 {
-		font-size: 0.7rem;
+		font-size: 0.75rem;
 		text-transform: uppercase;
 		letter-spacing: 0.06em;
 		color: var(--text-secondary);
-		margin: 0 0 0.5rem 0;
-		padding-bottom: 0.35rem;
+		margin: 0 0 0.75rem 0;
+		padding-bottom: 0.5rem;
 		border-bottom: 1px solid var(--border-light);
 	}
 
 	.deploy-form h2:not(:first-child) {
-		margin-top: 0.85rem;
+		margin-top: 1.25rem;
 	}
 
 	.deploy-form label > span:first-child {
 		display: block;
-		font-size: 0.65rem;
+		font-size: 0.7rem;
 		font-weight: 600;
 		color: var(--text-muted);
-		margin-bottom: 0.2rem;
+		margin-bottom: 0.35rem;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 	}
@@ -985,12 +985,12 @@
 	.deploy-form input[type="number"],
 	.deploy-form select {
 		width: 100%;
-		padding: 0.35rem 0.5rem;
+		padding: 0.5rem 0.75rem;
 		background: var(--bg-input);
 		border: 1px solid var(--border);
-		border-radius: 5px;
+		border-radius: 6px;
 		color: var(--text);
-		font-size: 0.75rem;
+		font-size: 0.8rem;
 		font-family: 'SF Mono', 'Consolas', monospace;
 		transition: border-color 0.15s;
 		min-height: 0;
@@ -1012,25 +1012,25 @@
 	.field-grid {
 		display: grid;
 		grid-template-columns: 1fr 1fr;
-		gap: 0.5rem;
+		gap: 1rem;
 	}
 
-	.field-grid.three-col { grid-template-columns: 1fr 1fr 1fr; }
+	.field-grid.three-col { grid-template-columns: 1fr 1fr 1fr; gap: 1rem; }
 
 	/* Toggle switches */
 	.toggle-stack {
 		display: flex;
 		flex-direction: column;
-		gap: 0.125rem;
+		gap: 0.5rem;
 	}
 
 	.toggle-label {
 		display: flex;
 		align-items: flex-start;
-		gap: 0.65rem;
+		gap: 0.75rem;
 		cursor: pointer;
-		padding: 0.5rem;
-		border-radius: 6px;
+		padding: 0.65rem;
+		border-radius: 8px;
 		transition: background 0.15s;
 	}
 
@@ -1081,7 +1081,7 @@
 	}
 
 	.toggle-title {
-		font-size: 0.8rem;
+		font-size: 0.85rem;
 		font-weight: 600;
 		color: var(--text);
 		text-transform: none;
@@ -1090,20 +1090,22 @@
 	}
 
 	.toggle-desc {
-		font-size: 0.7rem;
+		font-size: 0.75rem;
 		color: var(--text-muted);
 		text-transform: none;
 		letter-spacing: normal;
 		font-weight: normal;
-		line-height: 1.35;
+		line-height: 1.4;
 		display: block;
+		margin-top: 0.15rem;
 	}
 
 	/* Neutralization */
 	.neutralization-control {
 		display: flex;
 		flex-direction: column;
-		gap: 0.25rem;
+		gap: 0.5rem;
+		padding: 0.5rem 0;
 	}
 
 	.neutralization-header {
@@ -1111,7 +1113,7 @@
 	}
 
 	.neutralization-value {
-		font-size: 1.25rem;
+		font-size: 1.5rem;
 		font-weight: 700;
 		color: var(--blue);
 		font-variant-numeric: tabular-nums;
@@ -1120,7 +1122,7 @@
 	.neutralization-labels {
 		display: flex;
 		justify-content: space-between;
-		font-size: 0.65rem;
+		font-size: 0.7rem;
 		color: var(--text-muted);
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
@@ -1131,13 +1133,13 @@
 		display: flex;
 		flex-direction: column;
 		align-items: stretch;
-		gap: 0.75rem;
+		gap: 1rem;
 	}
 
 	.cost-estimate {
 		display: flex;
 		flex-direction: column;
-		gap: 0.35rem;
+		gap: 0.5rem;
 	}
 
 	.cost-row {
@@ -1171,11 +1173,11 @@
 		width: 100%;
 		background: var(--blue);
 		border: none;
-		padding: 0.55rem 1.5rem;
-		border-radius: 6px;
+		padding: 0.75rem 1.5rem;
+		border-radius: 8px;
 		cursor: pointer;
 		color: white;
-		font-size: 0.8rem;
+		font-size: 0.9rem;
 		font-weight: 700;
 		transition: opacity 0.15s, box-shadow 0.15s, transform 0.1s;
 		box-shadow: 0 2px 4px rgba(9, 105, 218, 0.25);
